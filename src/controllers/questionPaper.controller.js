@@ -1,4 +1,5 @@
 import QuestionPaper from '../models/QuestionPaper.js';
+import Question from '../models/Question.js';
 import Subject from '../models/Subject.js';
 import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
@@ -170,8 +171,87 @@ export const deleteQuestionPaper = async (req, res) => {
       return res.status(404).json({ message: 'Question paper not found' });
     }
 
+    // Get all questions associated with this question paper
+    const questions = await Question.find({ questionPaper: questionPaper._id });
+    const questionIds = questions.map(q => q._id);
+    const examIds = [...new Set(questions.map(q => q.exam.toString()))];
+
+    // Delete all questions associated with this question paper
+    const deleteResult = await Question.deleteMany({ questionPaper: questionPaper._id });
+    console.log(`Deleted ${deleteResult.deletedCount} questions for question paper ${questionPaper.name}`);
+
+    // Update exam question counts for all affected exams
+    const updateExamQuestionCounts = async (examId) => {
+      if (!examId) return;
+      
+      const exam = await Exam.findById(examId);
+      if (!exam) return;
+
+      // Count published questions for this exam
+      const directCount = await Question.countDocuments({ 
+        exam: examId, 
+        status: 'published' 
+      });
+      
+      exam.totalQuestions = directCount;
+      await exam.save();
+      console.log(`Updated ${exam.title || exam.name} totalQuestions to ${directCount}`);
+
+      // If this exam has a parent, update the parent's total too
+      if (exam.parentExam) {
+        await updateParentExamCounts(exam.parentExam);
+      }
+    };
+
+    // Helper function to update parent exam counts (sum of all sub-exams + direct questions)
+    const updateParentExamCounts = async (parentExamId) => {
+      const parentExam = await Exam.findById(parentExamId);
+      if (!parentExam) return;
+
+      // Get all child exams
+      const childExams = await Exam.find({ parentExam: parentExamId });
+      
+      // Count direct questions under parent
+      let totalCount = await Question.countDocuments({ 
+        exam: parentExamId, 
+        status: 'published' 
+      });
+
+      // Add questions from all child exams
+      for (const child of childExams) {
+        const childCount = await Question.countDocuments({ 
+          exam: child._id, 
+          status: 'published' 
+        });
+        totalCount += childCount;
+      }
+
+      parentExam.totalQuestions = totalCount;
+      await parentExam.save();
+      console.log(`Updated parent ${parentExam.title || parentExam.name} totalQuestions to ${totalCount}`);
+
+      // If parent has a grandparent, update that too (recursive)
+      if (parentExam.parentExam) {
+        await updateParentExamCounts(parentExam.parentExam);
+      }
+    };
+
+    // Update counts for all affected exams
+    for (const examId of examIds) {
+      await updateExamQuestionCounts(examId);
+    }
+
+    // Delete the question paper itself
     await questionPaper.deleteOne();
-    res.json({ message: 'Question paper deleted successfully' });
+    console.log(`Deleted question paper ${questionPaper.name}`);
+
+    res.json({ 
+      message: 'Question paper and all associated questions deleted successfully',
+      deleted: {
+        questions: deleteResult.deletedCount,
+        questionPaper: questionPaper.name
+      }
+    });
   } catch (error) {
     console.error('Error deleting question paper:', error);
     res.status(500).json({ message: 'Failed to delete question paper', error: error.message });

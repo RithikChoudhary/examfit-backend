@@ -1,4 +1,6 @@
 import Subject from '../models/Subject.js';
+import Question from '../models/Question.js';
+import QuestionPaper from '../models/QuestionPaper.js';
 import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
 
@@ -162,8 +164,96 @@ export const deleteSubject = async (req, res) => {
       return res.status(404).json({ message: 'Subject not found' });
     }
 
+    // Get all questions associated with this subject
+    const questions = await Question.find({ subject: subject._id });
+    const questionIds = questions.map(q => q._id);
+    const examIds = [...new Set(questions.map(q => q.exam.toString()))];
+
+    // Get all question papers associated with this subject
+    const questionPapers = await QuestionPaper.find({ subject: subject._id });
+    const questionPaperIds = questionPapers.map(qp => qp._id);
+
+    // Delete all questions associated with this subject
+    const questionsDeleteResult = await Question.deleteMany({ subject: subject._id });
+    console.log(`Deleted ${questionsDeleteResult.deletedCount} questions for subject ${subject.name}`);
+
+    // Delete all question papers associated with this subject
+    const questionPapersDeleteResult = await QuestionPaper.deleteMany({ subject: subject._id });
+    console.log(`Deleted ${questionPapersDeleteResult.deletedCount} question papers for subject ${subject.name}`);
+
+    // Update exam question counts for all affected exams
+    const updateExamQuestionCounts = async (examId) => {
+      if (!examId) return;
+      
+      const exam = await Exam.findById(examId);
+      if (!exam) return;
+
+      // Count published questions for this exam
+      const directCount = await Question.countDocuments({ 
+        exam: examId, 
+        status: 'published' 
+      });
+      
+      exam.totalQuestions = directCount;
+      await exam.save();
+      console.log(`Updated ${exam.title || exam.name} totalQuestions to ${directCount}`);
+
+      // If this exam has a parent, update the parent's total too
+      if (exam.parentExam) {
+        await updateParentExamCounts(exam.parentExam);
+      }
+    };
+
+    // Helper function to update parent exam counts (sum of all sub-exams + direct questions)
+    const updateParentExamCounts = async (parentExamId) => {
+      const parentExam = await Exam.findById(parentExamId);
+      if (!parentExam) return;
+
+      // Get all child exams
+      const childExams = await Exam.find({ parentExam: parentExamId });
+      
+      // Count direct questions under parent
+      let totalCount = await Question.countDocuments({ 
+        exam: parentExamId, 
+        status: 'published' 
+      });
+
+      // Add questions from all child exams
+      for (const child of childExams) {
+        const childCount = await Question.countDocuments({ 
+          exam: child._id, 
+          status: 'published' 
+        });
+        totalCount += childCount;
+      }
+
+      parentExam.totalQuestions = totalCount;
+      await parentExam.save();
+      console.log(`Updated parent ${parentExam.title || parentExam.name} totalQuestions to ${totalCount}`);
+
+      // If parent has a grandparent, update that too (recursive)
+      if (parentExam.parentExam) {
+        await updateParentExamCounts(parentExam.parentExam);
+      }
+    };
+
+    // Update counts for all affected exams
+    for (const examId of examIds) {
+      await updateExamQuestionCounts(examId);
+    }
+
+    // Delete the subject itself
     await subject.deleteOne();
-    res.json({ message: 'Subject deleted successfully' });
+    console.log(`Deleted subject ${subject.name}`);
+
+    res.json({ 
+      message: 'Subject and all associated content deleted successfully',
+      deleted: {
+        questions: questionsDeleteResult.deletedCount,
+        questionPapers: questionPapersDeleteResult.deletedCount,
+        subject: subject.name
+      }
+    });
   } catch (error) {
     console.error('Error deleting subject:', error);
     res.status(500).json({ message: 'Failed to delete subject', error: error.message });
