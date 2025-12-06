@@ -1,0 +1,14 @@
+services:
+  - name: my-node-backend
+    type: web
+    runtime: node
+    plan: free
+    region: frankfurt        # or oregon, singapore, etc. (optional)
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # MongoDB URI will be added in Render dashboard for security
+      # - key: MONGO_URI
+      #   sync: false  # you will add manually on the dashboard
