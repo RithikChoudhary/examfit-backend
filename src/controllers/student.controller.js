@@ -300,10 +300,21 @@ export const submitTest = async (req, res) => {
 export const getTestResult = async (req, res) => {
   try {
     const { testId } = req.params;
+    
+    // Log for debugging
+    console.log(`[getTestResult] Requested testId: ${testId}`);
+    console.log(`[getTestResult] Available tests: ${Array.from(TestAttempt.tests.keys()).length} tests in memory`);
+    console.log(`[getTestResult] Test IDs:`, Array.from(TestAttempt.tests.keys()).slice(0, 5));
 
     const test = TestAttempt.tests.get(testId);
     if (!test) {
-      return res.status(404).json({ error: 'Test not found' });
+      console.warn(`[getTestResult] Test not found: ${testId}`);
+      console.warn(`[getTestResult] This might be because the server restarted and in-memory tests were lost`);
+      return res.status(404).json({ 
+        error: 'Test not found',
+        message: 'The test may have expired due to server restart. Please start a new test.',
+        testId 
+      });
     }
 
     if (test.userId !== req.user._id.toString()) {

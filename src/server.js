@@ -79,6 +79,12 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Request logging middleware (for debugging)
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/boards', boardsRoutes);
 app.use('/api/exams', examsRoutes);
@@ -89,13 +95,29 @@ app.use('/api/questions', questionsRoutes);
 app.use('/api/student', studentsRoutes);
 app.use('/api/current-affairs', currentAffairsRoutes);
 
+// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  // Handle CORS errors specifically
+  if (err.message && err.message.includes('CORS')) {
+    console.error('CORS Error:', err.message);
+    return res.status(403).json({ 
+      error: 'CORS policy violation',
+      message: err.message 
+    });
+  }
+  
+  console.error('Error:', err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
+// 404 handler - must be last
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  console.warn(`[404] Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
 });
 
 const PORT = config.port;
