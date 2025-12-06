@@ -23,5 +23,11 @@ export const config = {
   seedAdminEmail: process.env.SEED_ADMIN_EMAIL || 'admin@examfit.test',
   seedAdminPass: process.env.SEED_ADMIN_PASS || 'AdminPassword123',
   nodeEnv: process.env.NODE_ENV || 'development',
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  backendUrl: process.env.BACKEND_URL || 'http://localhost:4000',
+  // CORS allowed origins
+  corsOrigins: process.env.CORS_ORIGINS 
+    ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+    : ['http://localhost:3000', 'http://localhost:5173', 'https://frontend.examfit.in'],
 };
 

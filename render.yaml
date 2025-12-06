@@ -1,5 +1,5 @@
 services:
-  - name: my-node-backend
+  - name: examfit-backend
     type: web
     runtime: node
     plan: free
@@ -9,6 +9,17 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # MongoDB URI will be added in Render dashboard for security
-      # - key: MONGO_URI
-      #   sync: false  # you will add manually on the dashboard
+      - key: PORT
+        value: 4000
+      - key: FRONTEND_URL
+        value: https://frontend.examfit.in
+      - key: BACKEND_URL
+        value: https://backend.examfit.in
+      - key: CORS_ORIGINS
+        value: https://frontend.examfit.in,https://examfit.in
+      # MongoDB URI - Add in Render dashboard for security
+      # - key: MONGODB_URI
+      #   sync: false
+      # JWT Secret - Add in Render dashboard for security
+      # - key: JWT_SECRET
+      #   sync: false
