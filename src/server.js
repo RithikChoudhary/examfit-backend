@@ -16,22 +16,43 @@ import currentAffairsRoutes from './routes/currentAffairs.routes.js';
 
 const app = express();
 
+// Trust proxy - required when behind a reverse proxy (Render, etc.)
+app.set('trust proxy', true);
+
 // CORS configuration - allows both local development and production domains
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    // Allow requests with no origin (like mobile apps, curl, Postman, etc.)
+    if (!origin) {
+      return callback(null, true);
+    }
     
-    // Check if origin is in allowed list
-    if (config.corsOrigins.indexOf(origin) !== -1 || config.nodeEnv === 'development') {
+    // Normalize origin (remove trailing slash)
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    
+    // In development, allow all localhost origins
+    if (config.nodeEnv === 'development') {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list (exact match or normalized)
+    const isAllowed = config.corsOrigins.some(allowedOrigin => {
+      const normalizedAllowed = allowedOrigin.replace(/\/$/, '');
+      return normalizedOrigin === normalizedAllowed || normalizedOrigin === allowedOrigin;
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Log the rejected origin for debugging
+      console.warn(`CORS: Rejected origin: ${origin}. Allowed origins:`, config.corsOrigins);
+      callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 app.use(cors(corsOptions));
@@ -50,7 +71,12 @@ mongoose.connect(config.mongodbUri)
   });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv,
+    corsOrigins: config.corsOrigins
+  });
 });
 
 app.use('/api/auth', authRoutes);

@@ -27,7 +27,9 @@ export const config = {
   backendUrl: process.env.BACKEND_URL || 'http://localhost:4000',
   // CORS allowed origins
   corsOrigins: process.env.CORS_ORIGINS 
-    ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
-    : ['http://localhost:3000', 'http://localhost:5173', 'https://frontend.examfit.in'],
+    ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(origin => origin)
+    : process.env.NODE_ENV === 'production'
+      ? ['https://frontend.examfit.in', 'https://examfit.in', 'https://www.examfit.in']
+      : ['http://localhost:3000', 'http://localhost:5173', 'https://frontend.examfit.in'],
 };
 

@@ -10,6 +10,9 @@ const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 100,
   message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Trust proxy is set in server.js, so this will work correctly
 });
 
 const registerValidation = [
