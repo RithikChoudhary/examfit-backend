@@ -296,7 +296,7 @@ export const submitTest = async (req, res) => {
 export const getTestResult = async (req, res) => {
   try {
     const { testId } = req.params;
-    
+
     const test = await TestAttempt.findOne({ testId });
     if (!test) {
       console.warn(`[getTestResult] Test not found: ${testId}`);

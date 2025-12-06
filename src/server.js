@@ -13,6 +13,7 @@ import subjectsRoutes from './routes/subjects.routes.js'; // Legacy - to be remo
 import questionsRoutes from './routes/questions.routes.js';
 import studentsRoutes from './routes/students.routes.js';
 import currentAffairsRoutes from './routes/currentAffairs.routes.js';
+import errorsRoutes from './routes/errors.routes.js';
 
 const app = express();
 
@@ -82,7 +83,7 @@ app.get('/', (req, res) => {
       docs: 'See API documentation for available endpoints'
     }
   });
-});
+  });
 
 app.get('/health', (req, res) => {
   res.json({ 
@@ -108,6 +109,7 @@ app.use('/api/subjects', subjectsRoutes); // Legacy - to be removed
 app.use('/api/questions', questionsRoutes);
 app.use('/api/student', studentsRoutes);
 app.use('/api/current-affairs', currentAffairsRoutes);
+app.use('/api/errors', errorsRoutes); // Frontend error logging
 
 // Error handling middleware
 app.use((err, req, res, next) => {
