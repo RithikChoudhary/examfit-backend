@@ -70,6 +70,20 @@ mongoose.connect(config.mongodbUri)
     process.exit(1);
   });
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'ExamFit Backend API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      docs: 'See API documentation for available endpoints'
+    }
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
