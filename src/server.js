@@ -83,7 +83,7 @@ app.get('/', (req, res) => {
       docs: 'See API documentation for available endpoints'
     }
   });
-  });
+});
 
 app.get('/health', (req, res) => {
   res.json({ 
