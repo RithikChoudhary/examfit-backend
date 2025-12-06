@@ -49,6 +49,7 @@ export const getAvailableDates = async (req, res) => {
       dates
     });
   } catch (error) {
+    console.error('Error getting available dates:', error);
     res.status(500).json({ error: error.message });
   }
 };
