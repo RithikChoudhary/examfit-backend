@@ -3,10 +3,7 @@ import Exam from '../models/Exam.js';
 import Subject from '../models/Subject.js';
 import QuestionPaper from '../models/QuestionPaper.js';
 import Question from '../models/Question.js';
-
-const TestAttempt = {
-  tests: new Map(),
-};
+import TestAttempt from '../models/TestAttempt.js';
 
 export const getBoards = async (req, res) => {
   try {
@@ -139,45 +136,44 @@ export const createTest = async (req, res) => {
 
     const testId = `test_${Date.now()}_${req.user._id}`;
 
-    const testData = {
+    // Create test attempt in database
+    const testAttempt = await TestAttempt.create({
       testId,
-      userId: req.user._id.toString(),
-      examId: exam?._id.toString(),
+      userId: req.user._id,
+      examId: exam?._id || null,
       subjectId: subject?._id || null,
       questionPaperId: questionPaperId || null,
-      exam: {
-        _id: exam?._id,
-        name: exam?.name,
-        title: exam?.title,
-        board: exam?.board,
-      },
+      exam: exam ? {
+        _id: exam._id,
+        name: exam.name,
+        title: exam.title,
+        board: exam.board,
+      } : null,
       subject: subject ? {
         _id: subject._id,
         name: subject.name,
         icon: subject.icon,
       } : null,
+      subjectName: subject?.name || null,
       questionPaper: questionPaper ? {
         _id: questionPaper._id,
         name: questionPaper.name,
       } : null,
-      questions: testQuestionsWithNumbers.map((q, idx) => ({
-        questionId: q._id.toString(),
+      questions: testQuestionsWithNumbers.map((q) => ({
+        questionId: q._id,
         question: q,
         answer: null,
         flagged: false,
       })),
       startedAt: new Date(),
       submitted: false,
-      answers: {},
-    };
-
-    TestAttempt.tests.set(testId, testData);
+    });
 
     res.status(201).json({
       testId,
-      exam: testData.exam,
-      subject: testData.subject,
-      questionPaper: testData.questionPaper,
+      exam: testAttempt.exam,
+      subject: testAttempt.subject,
+      questionPaper: testAttempt.questionPaper,
       questions: testQuestionsWithNumbers,
     });
   } catch (error) {
@@ -191,12 +187,12 @@ export const saveAnswer = async (req, res) => {
     const { testId } = req.params;
     const { questionId, answer, flagged } = req.body;
 
-    const test = TestAttempt.tests.get(testId);
+    const test = await TestAttempt.findOne({ testId });
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
 
-    if (test.userId !== req.user._id.toString()) {
+    if (test.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -204,21 +200,23 @@ export const saveAnswer = async (req, res) => {
       return res.status(400).json({ error: 'Test already submitted' });
     }
 
-    const question = test.questions.find(q => q.questionId === questionId);
+    const question = test.questions.find(q => q.questionId.toString() === questionId);
     if (question) {
       // Ensure answer is stored as a number
       if (answer !== undefined) {
-        const numAnswer = Number(answer);
+        const numAnswer = answer !== null ? Number(answer) : null;
         question.answer = numAnswer;
-        test.answers[questionId] = numAnswer;
       }
       if (flagged !== undefined) question.flagged = flagged;
+      
+      // Mark the questions array as modified so Mongoose saves it
+      test.markModified('questions');
+      await test.save();
     }
-
-    TestAttempt.tests.set(testId, test);
 
     res.json({ message: 'Answer saved', testId });
   } catch (error) {
+    console.error('Error saving answer:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -227,12 +225,12 @@ export const submitTest = async (req, res) => {
   try {
     const { testId } = req.params;
 
-    const test = TestAttempt.tests.get(testId);
+    const test = await TestAttempt.findOne({ testId });
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
 
-    if (test.userId !== req.user._id.toString()) {
+    if (test.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -252,13 +250,11 @@ export const submitTest = async (req, res) => {
 
     let correct = 0;
     const results = test.questions.map(q => {
-      const question = questionMap.get(q.questionId);
+      const question = questionMap.get(q.questionId.toString());
       // Ensure both values are numbers for comparison
       const userAnswer = q.answer !== null && q.answer !== undefined ? Number(q.answer) : null;
       const correctAnswer = question ? Number(question.correctIndex) : null;
       const isCorrect = userAnswer !== null && correctAnswer !== null && userAnswer === correctAnswer;
-      
-      console.log(`Question ${q.questionId}: userAnswer=${userAnswer} (${typeof q.answer}), correctAnswer=${correctAnswer}, isCorrect=${isCorrect}`);
       
       if (isCorrect) correct++;
 
@@ -272,27 +268,27 @@ export const submitTest = async (req, res) => {
         flagged: q.flagged,
       };
     });
-    
-    console.log(`Total correct: ${correct}/${test.questions.length}`);
 
     const score = (correct / test.questions.length) * 100;
+    
+    // Update test in database
     test.submitted = true;
     test.submittedAt = new Date();
-    test.score = score;
+    test.score = Math.round(score * 100) / 100;
     test.correct = correct;
     test.total = test.questions.length;
     test.results = results;
-
-    TestAttempt.tests.set(testId, test);
+    await test.save();
 
     res.json({
       testId,
-      score: Math.round(score * 100) / 100,
+      score: test.score,
       correct,
       total: test.questions.length,
       results,
     });
   } catch (error) {
+    console.error('Error submitting test:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -301,23 +297,17 @@ export const getTestResult = async (req, res) => {
   try {
     const { testId } = req.params;
     
-    // Log for debugging
-    console.log(`[getTestResult] Requested testId: ${testId}`);
-    console.log(`[getTestResult] Available tests: ${Array.from(TestAttempt.tests.keys()).length} tests in memory`);
-    console.log(`[getTestResult] Test IDs:`, Array.from(TestAttempt.tests.keys()).slice(0, 5));
-
-    const test = TestAttempt.tests.get(testId);
+    const test = await TestAttempt.findOne({ testId });
     if (!test) {
       console.warn(`[getTestResult] Test not found: ${testId}`);
-      console.warn(`[getTestResult] This might be because the server restarted and in-memory tests were lost`);
       return res.status(404).json({ 
         error: 'Test not found',
-        message: 'The test may have expired due to server restart. Please start a new test.',
+        message: 'The test may have expired or been deleted. Please start a new test.',
         testId 
       });
     }
 
-    if (test.userId !== req.user._id.toString()) {
+    if (test.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -326,14 +316,13 @@ export const getTestResult = async (req, res) => {
       const exam = await Exam.findById(test.examId);
       let subject = null;
       if (test.subjectId) {
-        const Subject = (await import('../models/Subject.js')).default;
         subject = await Subject.findById(test.subjectId);
       }
       return res.json({
         testId,
         examId: test.examId,
         subjectId: test.subjectId || null,
-        questionPaperId: test.questionPaperId || null, // Include questionPaperId for reset functionality
+        questionPaperId: test.questionPaperId || null,
         exam: exam ? {
           _id: exam._id,
           title: exam.title,
@@ -350,11 +339,11 @@ export const getTestResult = async (req, res) => {
     res.json({
       testId,
       examId: test.examId,
-      subjectId: test.subjectId || null, // Include subjectId for retake functionality
-      questionPaperId: test.questionPaperId || null, // Include questionPaperId for retake functionality
+      subjectId: test.subjectId || null,
+      questionPaperId: test.questionPaperId || null,
       subjectName: test.subjectName || null,
-      exam: test.exam || null, // Include full exam info with board
-      boardId: test.exam?.board?._id || test.exam?.board || null, // Include boardId for navigation
+      exam: test.exam || null,
+      boardId: test.exam?.board?._id || test.exam?.board || null,
       score: test.score,
       correct: test.correct,
       total: test.total,
@@ -364,6 +353,7 @@ export const getTestResult = async (req, res) => {
       submitted: true,
     });
   } catch (error) {
+    console.error('Error getting test result:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -372,20 +362,21 @@ export const deleteTest = async (req, res) => {
   try {
     const { testId } = req.params;
 
-    const test = TestAttempt.tests.get(testId);
+    const test = await TestAttempt.findOne({ testId });
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
 
-    if (test.userId !== req.user._id.toString()) {
+    if (test.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    TestAttempt.tests.delete(testId);
-    console.log(`Test ${testId} deleted`);
+    await TestAttempt.deleteOne({ testId });
+    console.log(`Test ${testId} deleted from database`);
 
     res.json({ message: 'Test deleted successfully' });
   } catch (error) {
+    console.error('Error deleting test:', error);
     res.status(500).json({ error: error.message });
   }
 };
