@@ -101,9 +101,20 @@ export const createQuestion = async (req, res) => {
       return res.status(400).json({ error: 'Invalid correctIndex' });
     }
 
+    // Clean up options - ensure media is null if empty
+    const cleanedOptions = options.map(opt => ({
+      text: opt.text,
+      media: (opt.media && opt.media.trim && opt.media.trim() !== '') ? opt.media : null,
+    }));
+
+    // Clean up media array
+    const cleanedMedia = Array.isArray(media) 
+      ? media.filter(img => img && typeof img === 'string' && img.trim() !== '')
+      : [];
+
     const question = new Question({
       text,
-      options,
+      options: cleanedOptions,
       correctIndex,
       explanation: explanation || '',
       questionPaper,
@@ -111,19 +122,35 @@ export const createQuestion = async (req, res) => {
       exam,
       difficulty: difficulty || 'medium',
       tags: tags || [],
-      media: media || [],
+      media: cleanedMedia,
       createdBy: req.user._id,
       status: status || 'draft',
     });
 
-    await question.save();
+    try {
+      await question.save();
+    } catch (saveError) {
+      console.error('Error saving question:', saveError);
+      console.error('Question data:', {
+        text: text?.substring(0, 100),
+        optionsCount: cleanedOptions.length,
+        mediaCount: cleanedMedia.length,
+        optionsWithMedia: cleanedOptions.filter(opt => opt.media).length,
+      });
+      throw saveError;
+    }
 
     // Update exam counts (including parent exams)
     await updateExamQuestionCounts(exam);
 
     res.status(201).json({ question });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error in createQuestion:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -229,6 +256,7 @@ export const updateQuestion = async (req, res) => {
     const updateData = { ...req.body };
     delete updateData.createdBy;
 
+    // Clean up options if provided
     if (updateData.options) {
       if (updateData.options.length < 2) {
         return res.status(400).json({ error: 'At least 2 options required' });
@@ -238,13 +266,35 @@ export const updateQuestion = async (req, res) => {
           return res.status(400).json({ error: 'Invalid correctIndex' });
         }
       }
+      // Clean up options media
+      updateData.options = updateData.options.map(opt => ({
+        text: opt.text,
+        media: (opt.media && opt.media.trim && opt.media.trim() !== '') ? opt.media : null,
+      }));
     }
 
-    const updatedQuestion = await Question.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    // Clean up media if provided
+    if (updateData.media !== undefined) {
+      updateData.media = Array.isArray(updateData.media)
+        ? updateData.media.filter(img => img && typeof img === 'string' && img.trim() !== '')
+        : [];
+    }
+
+    let updatedQuestion;
+    try {
+      updatedQuestion = await Question.findByIdAndUpdate(
+        req.params.id,
+        updateData,
+        { new: true, runValidators: true }
+      );
+    } catch (updateError) {
+      console.error('Error updating question:', updateError);
+      console.error('Update data:', {
+        optionsCount: updateData.options?.length,
+        mediaCount: updateData.media?.length,
+      });
+      throw updateError;
+    }
 
     // Update exam counts for old exam (if exam changed)
     if (oldExamId.toString() !== updatedQuestion.exam.toString()) {
@@ -256,7 +306,12 @@ export const updateQuestion = async (req, res) => {
 
     res.json({ question: updatedQuestion });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error in updateQuestion:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 

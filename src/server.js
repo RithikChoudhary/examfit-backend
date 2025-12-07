@@ -57,8 +57,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase body size limit to handle base64 images (50MB limit)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 mongoose.connect(config.mongodbUri)
   .then(() => {
@@ -83,7 +84,7 @@ app.get('/', (req, res) => {
       docs: 'See API documentation for available endpoints'
     }
   });
-});
+  });
 
 app.get('/health', (req, res) => {
   res.json({ 
