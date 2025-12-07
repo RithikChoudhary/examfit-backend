@@ -26,7 +26,13 @@ const testAttemptSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
+    required: false, // Optional for anonymous users
+    default: null,
+    index: true,
+  },
+  sessionId: {
+    type: String,
+    default: null, // For anonymous users
     index: true,
   },
   examId: {
@@ -129,6 +135,7 @@ const testAttemptSchema = new mongoose.Schema({
 
 // Index for efficient queries
 testAttemptSchema.index({ userId: 1, submitted: 1, createdAt: -1 });
+testAttemptSchema.index({ sessionId: 1, submitted: 1, createdAt: -1 }); // For anonymous users
 testAttemptSchema.index({ testId: 1 });
 testAttemptSchema.index({ userId: 1, examId: 1 });
 

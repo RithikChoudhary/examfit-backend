@@ -128,7 +128,7 @@ export const createQuestion = async (req, res) => {
     });
 
     try {
-      await question.save();
+    await question.save();
     } catch (saveError) {
       console.error('Error saving question:', saveError);
       console.error('Question data:', {
@@ -283,10 +283,10 @@ export const updateQuestion = async (req, res) => {
     let updatedQuestion;
     try {
       updatedQuestion = await Question.findByIdAndUpdate(
-        req.params.id,
-        updateData,
-        { new: true, runValidators: true }
-      );
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
     } catch (updateError) {
       console.error('Error updating question:', updateError);
       console.error('Update data:', {

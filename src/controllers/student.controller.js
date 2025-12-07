@@ -27,12 +27,12 @@ export const getBoards = async (req, res) => {
     const organizedBoards = boards
       .filter(board => board.exams && board.exams.length > 0)
       .map(board => ({
-        _id: board._id,
-        name: board.name,
-        slug: board.slug,
-        description: board.description,
-        exams: organizeExams(board.exams),
-      }));
+      _id: board._id,
+      name: board.name,
+      slug: board.slug,
+      description: board.description,
+      exams: organizeExams(board.exams),
+    }));
 
     res.json({ boards: organizedBoards });
   } catch (error) {
@@ -144,12 +144,16 @@ export const createTest = async (req, res) => {
       return qObj;
     });
 
-    const testId = `test_${Date.now()}_${req.user._id}`;
+    // Generate test ID - use userId if logged in, otherwise use session ID
+    const userId = req.user?._id || null;
+    const sessionId = userId ? null : `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const testId = userId ? `test_${Date.now()}_${userId}` : `test_${Date.now()}_${sessionId}`;
 
     // Create test attempt in database
     const testAttempt = await TestAttempt.create({
       testId,
-      userId: req.user._id,
+      userId: userId,
+      sessionId: sessionId,
       examId: exam?._id || null,
       subjectId: subject?._id || null,
       questionPaperId: questionPaperId || null,
@@ -198,7 +202,10 @@ export const saveAnswer = async (req, res) => {
     const { questionId, answer, flagged } = req.body;
 
     // Use atomic update to avoid version conflicts
-    const updateQuery = { testId, userId: req.user._id, submitted: false };
+    // Allow access if userId matches OR if test has no userId (anonymous) and session matches
+    const updateQuery = req.user 
+      ? { testId, userId: req.user._id, submitted: false }
+      : { testId, userId: null, sessionId: { $exists: true }, submitted: false };
     const updateData = {};
     
     // Build the update query for the specific question in the array
@@ -224,15 +231,23 @@ export const saveAnswer = async (req, res) => {
     if (!result) {
       // Check if test exists but is submitted or belongs to different user
       const test = await TestAttempt.findOne({ testId });
-      if (!test) {
-        return res.status(404).json({ error: 'Test not found' });
-      }
-      if (test.userId.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'Not authorized' });
-      }
-      if (test.submitted) {
-        return res.status(400).json({ error: 'Test already submitted' });
-      }
+    if (!test) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+        // Check authorization - allow if userId matches OR if anonymous (no userId)
+        if (req.user) {
+          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        } else {
+          // Anonymous user - can only access tests with no userId (anonymous tests)
+          if (test.userId) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        }
+    if (test.submitted) {
+      return res.status(400).json({ error: 'Test already submitted' });
+    }
       // If we get here, it's a version conflict - retry once
       return res.status(409).json({ error: 'Update conflict. Please try again.' });
     }
@@ -262,15 +277,23 @@ export const submitTest = async (req, res) => {
     while (retries > 0) {
       try {
         test = await TestAttempt.findOne({ testId });
-        if (!test) {
-          return res.status(404).json({ error: 'Test not found' });
+    if (!test) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+
+        // Check authorization - allow if userId matches OR if anonymous (no userId)
+        if (req.user) {
+          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        } else {
+          // Anonymous user - can only access tests with no userId (anonymous tests)
+          if (test.userId) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
         }
 
-        if (test.userId.toString() !== req.user._id.toString()) {
-          return res.status(403).json({ error: 'Not authorized' });
-        }
-
-        if (test.submitted) {
+    if (test.submitted) {
           // Test already submitted, return existing results
           return res.json({
             testId,
@@ -280,40 +303,40 @@ export const submitTest = async (req, res) => {
             results: test.results,
             alreadySubmitted: true,
           });
-        }
+    }
 
-        const questionIds = test.questions.map(q => q.questionId);
-        const questions = await Question.find({
-          _id: { $in: questionIds },
-        });
+    const questionIds = test.questions.map(q => q.questionId);
+    const questions = await Question.find({
+      _id: { $in: questionIds },
+    });
 
-        const questionMap = new Map();
-        questions.forEach(q => {
-          questionMap.set(q._id.toString(), q);
-        });
+    const questionMap = new Map();
+    questions.forEach(q => {
+      questionMap.set(q._id.toString(), q);
+    });
 
-        let correct = 0;
-        const results = test.questions.map(q => {
+    let correct = 0;
+    const results = test.questions.map(q => {
           const question = questionMap.get(q.questionId.toString());
-          // Ensure both values are numbers for comparison
-          const userAnswer = q.answer !== null && q.answer !== undefined ? Number(q.answer) : null;
-          const correctAnswer = question ? Number(question.correctIndex) : null;
-          const isCorrect = userAnswer !== null && correctAnswer !== null && userAnswer === correctAnswer;
-          
-          if (isCorrect) correct++;
+      // Ensure both values are numbers for comparison
+      const userAnswer = q.answer !== null && q.answer !== undefined ? Number(q.answer) : null;
+      const correctAnswer = question ? Number(question.correctIndex) : null;
+      const isCorrect = userAnswer !== null && correctAnswer !== null && userAnswer === correctAnswer;
+      
+      if (isCorrect) correct++;
 
-          return {
-            questionId: q.questionId,
-            question: q.question,
-            userAnswer: userAnswer,
-            correctAnswer: correctAnswer,
-            isCorrect,
-            explanation: question ? question.explanation : '',
-            flagged: q.flagged,
-          };
-        });
+      return {
+        questionId: q.questionId,
+        question: q.question,
+        userAnswer: userAnswer,
+        correctAnswer: correctAnswer,
+        isCorrect,
+        explanation: question ? question.explanation : '',
+        flagged: q.flagged,
+      };
+    });
 
-        const score = (correct / test.questions.length) * 100;
+    const score = (correct / test.questions.length) * 100;
         
         // Use atomic update to avoid version conflicts
         const updateResult = await TestAttempt.findOneAndUpdate(
@@ -326,9 +349,9 @@ export const submitTest = async (req, res) => {
             $set: {
               submitted: true,
               submittedAt: new Date(),
-              score: Math.round(score * 100) / 100,
+      score: Math.round(score * 100) / 100,
               correct: correct,
-              total: test.questions.length,
+      total: test.questions.length,
               results: results,
             }
           },
@@ -400,9 +423,17 @@ export const getTestResult = async (req, res) => {
       });
     }
 
-    if (test.userId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
+        // Check authorization - allow if userId matches OR if anonymous (no userId)
+        if (req.user) {
+          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        } else {
+          // Anonymous user - can only access tests with no userId (anonymous tests)
+          if (test.userId) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        }
 
     if (!test.submitted) {
       // Return test data for in-progress tests
@@ -460,9 +491,17 @@ export const deleteTest = async (req, res) => {
       return res.status(404).json({ error: 'Test not found' });
     }
 
-    if (test.userId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
+        // Check authorization - allow if userId matches OR if anonymous (no userId)
+        if (req.user) {
+          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        } else {
+          // Anonymous user - can only access tests with no userId (anonymous tests)
+          if (test.userId) {
+            return res.status(403).json({ error: 'Not authorized' });
+          }
+        }
 
     await TestAttempt.deleteOne({ testId });
     console.log(`Test ${testId} deleted from database`);
