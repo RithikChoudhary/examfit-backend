@@ -35,6 +35,11 @@ const subjectSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  sectionPriorities: {
+    type: Map,
+    of: Number,
+    default: {},
+  },
   meta: {
     type: mongoose.Schema.Types.Mixed,
     default: {},

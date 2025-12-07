@@ -19,9 +19,13 @@ export const getSubjects = async (req, res) => {
       .sort({ priority: -1, name: 1 })
       .lean();
     
-    // Add name field from title for compatibility
+    // Add name field from title for compatibility and convert Maps
     subjects.forEach(subject => {
       if (subject.exam) subject.exam.name = subject.exam.title;
+      // Convert Map to object for JSON response
+      if (subject.sectionPriorities instanceof Map) {
+        subject.sectionPriorities = Object.fromEntries(subject.sectionPriorities);
+      }
     });
 
     res.json(subjects);
@@ -44,6 +48,11 @@ export const getSubject = async (req, res) => {
     }
     
     if (subject.exam) subject.exam.name = subject.exam.title;
+    
+    // Convert Map to object for JSON response
+    if (subject.sectionPriorities instanceof Map) {
+      subject.sectionPriorities = Object.fromEntries(subject.sectionPriorities);
+    }
 
     res.json(subject);
   } catch (error) {
@@ -90,6 +99,11 @@ export const createSubject = async (req, res) => {
       .lean();
     
     if (populatedSubject.exam) populatedSubject.exam.name = populatedSubject.exam.title;
+    
+    // Convert Map to object for JSON response
+    if (populatedSubject.sectionPriorities instanceof Map) {
+      populatedSubject.sectionPriorities = Object.fromEntries(populatedSubject.sectionPriorities);
+    }
 
     res.status(201).json(populatedSubject);
   } catch (error) {
@@ -139,6 +153,12 @@ export const updateSubject = async (req, res) => {
     if (description !== undefined) subject.description = description;
     if (icon) subject.icon = icon;
     if (priority !== undefined) subject.priority = priority;
+    if (req.body.sectionPriorities !== undefined) {
+      // Convert object to Map if provided
+      if (typeof req.body.sectionPriorities === 'object' && req.body.sectionPriorities !== null) {
+        subject.sectionPriorities = new Map(Object.entries(req.body.sectionPriorities));
+      }
+    }
 
     await subject.save();
 
@@ -148,6 +168,11 @@ export const updateSubject = async (req, res) => {
       .lean();
     
     if (populatedSubject.exam) populatedSubject.exam.name = populatedSubject.exam.title;
+    
+    // Convert Map to object for JSON response
+    if (populatedSubject.sectionPriorities instanceof Map) {
+      populatedSubject.sectionPriorities = Object.fromEntries(populatedSubject.sectionPriorities);
+    }
 
     res.json(populatedSubject);
   } catch (error) {
