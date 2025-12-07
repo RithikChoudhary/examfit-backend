@@ -57,6 +57,7 @@ const examSchema = new mongoose.Schema({
 examSchema.index({ slug: 1 });
 examSchema.index({ board: 1 });
 examSchema.index({ parentExam: 1 });
+examSchema.index({ subjects: 1 }); // Index for populate operations
 
 export default mongoose.model('Exam', examSchema);
 

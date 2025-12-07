@@ -7,26 +7,36 @@ import TestAttempt from '../models/TestAttempt.js';
 
 export const getBoards = async (req, res) => {
   try {
+    // Optimize: Use lean() for faster queries and select only needed fields
     const boards = await Board.find()
+      .select('_id name slug description exams')
       .populate({
         path: 'exams',
+        select: '_id title slug parentExam',
+        match: { parentExam: null }, // Only get root exams (no parent)
         populate: {
           path: 'subjects',
           model: 'Subject',
+          select: '_id name icon exam', // Only select needed fields
         },
       })
-      .sort({ name: 1 });
+      .sort({ name: 1 })
+      .lean(); // Use lean() for better performance
 
-    const organizedBoards = boards.map(board => ({
-      _id: board._id,
-      name: board.name,
-      slug: board.slug,
-      description: board.description,
-      exams: organizeExams(board.exams),
-    }));
+    // Filter out boards with no exams after populate
+    const organizedBoards = boards
+      .filter(board => board.exams && board.exams.length > 0)
+      .map(board => ({
+        _id: board._id,
+        name: board.name,
+        slug: board.slug,
+        description: board.description,
+        exams: organizeExams(board.exams),
+      }));
 
     res.json({ boards: organizedBoards });
   } catch (error) {
+    console.error('Error fetching boards:', error);
     res.status(500).json({ error: error.message });
   }
 };
