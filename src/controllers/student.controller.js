@@ -187,36 +187,56 @@ export const saveAnswer = async (req, res) => {
     const { testId } = req.params;
     const { questionId, answer, flagged } = req.body;
 
-    const test = await TestAttempt.findOne({ testId });
-    if (!test) {
-      return res.status(404).json({ error: 'Test not found' });
+    // Use atomic update to avoid version conflicts
+    const updateQuery = { testId, userId: req.user._id, submitted: false };
+    const updateData = {};
+    
+    // Build the update query for the specific question in the array
+    if (answer !== undefined) {
+      const numAnswer = answer !== null ? Number(answer) : null;
+      updateData['questions.$[elem].answer'] = numAnswer;
+    }
+    if (flagged !== undefined) {
+      updateData['questions.$[elem].flagged'] = flagged;
     }
 
-    if (test.userId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
-
-    if (test.submitted) {
-      return res.status(400).json({ error: 'Test already submitted' });
-    }
-
-    const question = test.questions.find(q => q.questionId.toString() === questionId);
-    if (question) {
-      // Ensure answer is stored as a number
-      if (answer !== undefined) {
-        const numAnswer = answer !== null ? Number(answer) : null;
-        question.answer = numAnswer;
+    // Use findOneAndUpdate with arrayFilters for atomic update
+    const result = await TestAttempt.findOneAndUpdate(
+      updateQuery,
+      { $set: updateData },
+      {
+        arrayFilters: [{ 'elem.questionId': questionId }],
+        new: true,
+        runValidators: true,
       }
-      if (flagged !== undefined) question.flagged = flagged;
-      
-      // Mark the questions array as modified so Mongoose saves it
-      test.markModified('questions');
-      await test.save();
+    );
+
+    if (!result) {
+      // Check if test exists but is submitted or belongs to different user
+      const test = await TestAttempt.findOne({ testId });
+      if (!test) {
+        return res.status(404).json({ error: 'Test not found' });
+      }
+      if (test.userId.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ error: 'Not authorized' });
+      }
+      if (test.submitted) {
+        return res.status(400).json({ error: 'Test already submitted' });
+      }
+      // If we get here, it's a version conflict - retry once
+      return res.status(409).json({ error: 'Update conflict. Please try again.' });
     }
 
     res.json({ message: 'Answer saved', testId });
   } catch (error) {
     console.error('Error saving answer:', error);
+    // Handle version conflict specifically
+    if (error.name === 'VersionError' || error.message.includes('No matching document')) {
+      return res.status(409).json({ 
+        error: 'Update conflict. Your answer will be saved on the next autosave.',
+        retry: true 
+      });
+    }
     res.status(500).json({ error: error.message });
   }
 };
@@ -225,68 +245,131 @@ export const submitTest = async (req, res) => {
   try {
     const { testId } = req.params;
 
-    const test = await TestAttempt.findOne({ testId });
-    if (!test) {
-      return res.status(404).json({ error: 'Test not found' });
-    }
-
-    if (test.userId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
-
-    if (test.submitted) {
-      return res.status(400).json({ error: 'Test already submitted' });
-    }
-
-    const questionIds = test.questions.map(q => q.questionId);
-    const questions = await Question.find({
-      _id: { $in: questionIds },
-    });
-
-    const questionMap = new Map();
-    questions.forEach(q => {
-      questionMap.set(q._id.toString(), q);
-    });
-
-    let correct = 0;
-    const results = test.questions.map(q => {
-      const question = questionMap.get(q.questionId.toString());
-      // Ensure both values are numbers for comparison
-      const userAnswer = q.answer !== null && q.answer !== undefined ? Number(q.answer) : null;
-      const correctAnswer = question ? Number(question.correctIndex) : null;
-      const isCorrect = userAnswer !== null && correctAnswer !== null && userAnswer === correctAnswer;
-      
-      if (isCorrect) correct++;
-
-      return {
-        questionId: q.questionId,
-        question: q.question,
-        userAnswer: userAnswer,
-        correctAnswer: correctAnswer,
-        isCorrect,
-        explanation: question ? question.explanation : '',
-        flagged: q.flagged,
-      };
-    });
-
-    const score = (correct / test.questions.length) * 100;
+    // Retry logic for version conflicts
+    let retries = 3;
+    let test = null;
     
-    // Update test in database
-    test.submitted = true;
-    test.submittedAt = new Date();
-    test.score = Math.round(score * 100) / 100;
-    test.correct = correct;
-    test.total = test.questions.length;
-    test.results = results;
-    await test.save();
+    while (retries > 0) {
+      try {
+        test = await TestAttempt.findOne({ testId });
+        if (!test) {
+          return res.status(404).json({ error: 'Test not found' });
+        }
 
-    res.json({
-      testId,
-      score: test.score,
-      correct,
-      total: test.questions.length,
-      results,
-    });
+        if (test.userId.toString() !== req.user._id.toString()) {
+          return res.status(403).json({ error: 'Not authorized' });
+        }
+
+        if (test.submitted) {
+          // Test already submitted, return existing results
+          return res.json({
+            testId,
+            score: test.score,
+            correct: test.correct,
+            total: test.total,
+            results: test.results,
+            alreadySubmitted: true,
+          });
+        }
+
+        const questionIds = test.questions.map(q => q.questionId);
+        const questions = await Question.find({
+          _id: { $in: questionIds },
+        });
+
+        const questionMap = new Map();
+        questions.forEach(q => {
+          questionMap.set(q._id.toString(), q);
+        });
+
+        let correct = 0;
+        const results = test.questions.map(q => {
+          const question = questionMap.get(q.questionId.toString());
+          // Ensure both values are numbers for comparison
+          const userAnswer = q.answer !== null && q.answer !== undefined ? Number(q.answer) : null;
+          const correctAnswer = question ? Number(question.correctIndex) : null;
+          const isCorrect = userAnswer !== null && correctAnswer !== null && userAnswer === correctAnswer;
+          
+          if (isCorrect) correct++;
+
+          return {
+            questionId: q.questionId,
+            question: q.question,
+            userAnswer: userAnswer,
+            correctAnswer: correctAnswer,
+            isCorrect,
+            explanation: question ? question.explanation : '',
+            flagged: q.flagged,
+          };
+        });
+
+        const score = (correct / test.questions.length) * 100;
+        
+        // Use atomic update to avoid version conflicts
+        const updateResult = await TestAttempt.findOneAndUpdate(
+          { 
+            _id: test._id, 
+            submitted: false, // Only update if not already submitted
+            __v: test.__v // Match the version we read
+          },
+          {
+            $set: {
+              submitted: true,
+              submittedAt: new Date(),
+              score: Math.round(score * 100) / 100,
+              correct: correct,
+              total: test.questions.length,
+              results: results,
+            }
+          },
+          { 
+            new: true, 
+            runValidators: true 
+          }
+        );
+
+        if (!updateResult) {
+          // Version conflict or already submitted - retry
+          retries--;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries))); // Exponential backoff
+            continue;
+          } else {
+            // Check if it was submitted by another request
+            const updatedTest = await TestAttempt.findOne({ testId });
+            if (updatedTest && updatedTest.submitted) {
+              return res.json({
+                testId,
+                score: updatedTest.score,
+                correct: updatedTest.correct,
+                total: updatedTest.total,
+                results: updatedTest.results,
+                alreadySubmitted: true,
+              });
+            }
+            throw new Error('Failed to submit test after retries. Please try again.');
+          }
+        }
+
+        // Success!
+        return res.json({
+          testId,
+          score: updateResult.score,
+          correct: updateResult.correct,
+          total: updateResult.total,
+          results: updateResult.results,
+        });
+      } catch (retryError) {
+        if (retryError.name === 'VersionError' || retryError.message.includes('No matching document')) {
+          retries--;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries)));
+            continue;
+          }
+        }
+        throw retryError;
+      }
+    }
   } catch (error) {
     console.error('Error submitting test:', error);
     res.status(500).json({ error: error.message });
