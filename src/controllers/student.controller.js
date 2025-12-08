@@ -9,10 +9,12 @@ export const getBoards = async (req, res) => {
   try {
     // Optimize: Only fetch minimal data needed for home page
     // Remove nested populates - not needed on home page
+    // Use indexes for faster sorting
     const boards = await Board.find()
-      .select('_id name slug description')
+      .select('_id name slug description priority')
       .sort({ priority: 1, name: 1 })
-      .lean(); // Use lean() for better performance
+      .limit(50) // Limit results for performance
+      .lean(); // Use lean() for better performance - returns plain JS objects
 
     // Return minimal data
     const organizedBoards = boards.map(board => ({
@@ -22,6 +24,8 @@ export const getBoards = async (req, res) => {
       description: board.description || '',
     }));
 
+    // Set cache headers for better performance
+    res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
     res.json({ boards: organizedBoards });
   } catch (error) {
     console.error('Error fetching boards:', error);

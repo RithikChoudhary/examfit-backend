@@ -33,6 +33,7 @@ const boardSchema = new mongoose.Schema({
 
 boardSchema.index({ name: 1 });
 boardSchema.index({ exams: 1 }); // Index for populate operations
+boardSchema.index({ priority: 1, name: 1 }); // Compound index for sorting
 
 export default mongoose.model('Board', boardSchema);
 
