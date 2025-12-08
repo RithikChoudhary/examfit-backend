@@ -84,14 +84,24 @@ export const getExams = async (req, res) => {
 
 export const getExam = async (req, res) => {
   try {
+    // Optimize: Use lean(), select only needed fields, limit subjects
     const exam = await Exam.findById(req.params.id)
+      .select('_id title slug board parentExam subjects duration totalQuestions priority meta createdAt')
       .populate('board', 'name slug')
       .populate('parentExam', 'title slug')
-      .populate('subjects', 'name');
+      .populate({
+        path: 'subjects',
+        select: 'name slug icon',
+        options: { limit: 100 } // Limit subjects to avoid huge responses
+      })
+      .lean(); // Use lean() for better performance
 
     if (!exam) {
       return res.status(404).json({ error: 'Exam not found' });
     }
+
+    // Add name field from title for compatibility
+    exam.name = exam.title;
 
     res.json({ exam });
   } catch (error) {

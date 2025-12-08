@@ -67,13 +67,13 @@ export const getBoard = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Optimize: Use lean() and select only needed fields, avoid nested populate
+    // Optimize: Use lean() and select only needed fields, limit exams more aggressively
     const board = await Board.findById(id)
       .select('_id name slug description priority exams createdAt')
       .populate({
         path: 'exams',
-        select: 'title slug duration totalQuestions', // Removed parentExam to avoid nested populate
-        options: { limit: 50 } // Limit exams to avoid huge responses
+        select: 'title slug duration totalQuestions',
+        options: { limit: 20, sort: { priority: 1 } } // Reduced to 20, add sorting
       })
       .lean(); // Use lean() for better performance
 

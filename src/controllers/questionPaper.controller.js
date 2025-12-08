@@ -14,11 +14,14 @@ export const getQuestionPapers = async (req, res) => {
     if (examId) query.exam = examId;
     if (boardId) query.board = boardId;
 
+    // Optimize: Select only needed fields, limit results, optimize populates
     const questionPapers = await QuestionPaper.find(query)
+      .select('_id name subject exam board section year duration totalMarks priority createdAt')
       .populate('subject', 'name slug icon')
       .populate('exam', 'title slug')
       .populate('board', 'name slug')
       .sort({ section: 1, year: -1, priority: -1, name: 1 })
+      .limit(200) // Limit to 200 question papers to avoid huge responses
       .lean();
     
     // Add name field from title for compatibility
