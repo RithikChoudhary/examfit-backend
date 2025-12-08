@@ -37,11 +37,18 @@ export const getBoards = async (req, res) => {
   try {
     const { page, limit, skip } = getPaginationParams(req);
     
+    // Optimize: Use lean() and select only needed fields, limit populate
     const boards = await Board.find()
-      .populate('exams', 'title slug')
+      .select('_id name slug description priority exams createdAt')
+      .populate({
+        path: 'exams',
+        select: 'title slug',
+        options: { limit: 10 } // Limit exams per board to avoid huge responses
+      })
       .skip(skip)
       .limit(limit)
-      .sort({ priority: 1, createdAt: -1 });
+      .sort({ priority: 1, createdAt: -1 })
+      .lean(); // Use lean() for better performance
 
     const total = await Board.countDocuments();
 
@@ -60,8 +67,15 @@ export const getBoard = async (req, res) => {
   try {
     const { id } = req.params;
     
+    // Optimize: Use lean() and select only needed fields, avoid nested populate
     const board = await Board.findById(id)
-      .populate('exams', 'title slug parentExam duration totalQuestions');
+      .select('_id name slug description priority exams createdAt')
+      .populate({
+        path: 'exams',
+        select: 'title slug duration totalQuestions', // Removed parentExam to avoid nested populate
+        options: { limit: 50 } // Limit exams to avoid huge responses
+      })
+      .lean(); // Use lean() for better performance
 
     if (!board) {
       return res.status(404).json({ error: 'Board not found' });
