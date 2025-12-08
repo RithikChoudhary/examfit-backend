@@ -421,6 +421,20 @@ export const getTestResult = async (req, res) => {
   try {
     const { testId } = req.params;
 
+    // Create cache key for test result (only cache submitted tests)
+    const cacheKey = `testResult:${testId}`;
+    
+    // Check cache first (only for submitted tests)
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      console.log('⚡ Cache HIT: Returning test result from cache');
+      res.set('Cache-Control', 'public, max-age=60'); // Shorter TTL for test results
+      res.set('X-Cache-Status', 'HIT');
+      return res.json(cached);
+    }
+
+    // Cache miss - fetch from database
+    console.log('💾 Cache MISS: Fetching test result from database');
     const test = await TestAttempt.findOne({ testId });
     if (!test) {
       console.warn(`[getTestResult] Test not found: ${testId}`);
@@ -444,13 +458,13 @@ export const getTestResult = async (req, res) => {
     }
 
     if (!test.submitted) {
-      // Return test data for in-progress tests
+      // Return test data for in-progress tests (don't cache in-progress tests)
       const exam = await Exam.findById(test.examId);
       let subject = null;
       if (test.subjectId) {
         subject = await Subject.findById(test.subjectId);
       }
-      return res.json({
+      const response = {
         testId,
         examId: test.examId,
         subjectId: test.subjectId || null,
@@ -465,10 +479,14 @@ export const getTestResult = async (req, res) => {
         } : null,
         submitted: false,
         questions: test.questions.map(q => q.question),
-      });
+      };
+      res.set('Cache-Control', 'no-cache'); // Don't cache in-progress tests
+      res.set('X-Cache-Status', 'SKIP');
+      return res.json(response);
     }
 
-    res.json({
+    // Submitted test - cache the result
+    const response = {
       testId,
       examId: test.examId,
       subjectId: test.subjectId || null,
@@ -483,7 +501,14 @@ export const getTestResult = async (req, res) => {
       submittedAt: test.submittedAt,
       results: test.results,
       submitted: true,
-    });
+    };
+
+    // Store submitted test results in cache for 1 hour (they don't change)
+    await cacheService.set(cacheKey, response, 60 * 60 * 1000);
+
+    res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    res.set('X-Cache-Status', 'MISS');
+    res.json(response);
   } catch (error) {
     console.error('Error getting test result:', error);
     res.status(500).json({ error: error.message });
