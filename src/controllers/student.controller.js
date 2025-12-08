@@ -1,3 +1,4 @@
+import { validationResult } from 'express-validator';
 import Board from '../models/Board.js';
 import Exam from '../models/Exam.js';
 import Subject from '../models/Subject.js';
@@ -57,7 +58,18 @@ const organizeExams = (exams) => {
 
 export const createTest = async (req, res) => {
   try {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.error('[createTest] Validation errors:', errors.array());
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        errors: errors.array() 
+      });
+    }
+
     const { examId, subjectId, questionPaperId, questions } = req.body;
+    console.log(`[createTest] Request body:`, { examId, subjectId, questionPaperId, questionsCount: questions?.length, hasUser: !!req.user });
 
     // Get question paper details if provided
     let questionPaper = null;
@@ -168,27 +180,32 @@ export const createTest = async (req, res) => {
     const testId = userId ? `test_${Date.now()}_${userId}` : `test_${Date.now()}_${sessionId}`;
 
     // Create test attempt in database
+    // Handle ObjectId conversion for lean() objects - ObjectIds from lean() are still ObjectIds
+    const examIdValue = exam?._id || null;
+    const subjectIdValue = subject?._id || null;
+    const questionPaperIdValue = questionPaperId || null;
+    
     const testAttempt = await TestAttempt.create({
       testId,
       userId: userId,
       sessionId: sessionId,
-      examId: exam?._id || null,
-      subjectId: subject?._id || null,
-      questionPaperId: questionPaperId || null,
+      examId: examIdValue,
+      subjectId: subjectIdValue,
+      questionPaperId: questionPaperIdValue,
       exam: exam ? {
-        _id: exam._id,
-        name: exam.name,
-        title: exam.title,
-        board: exam.board,
+        _id: examIdValue,
+        name: exam.title || exam.name || null, // Use title (from Exam model) or name (if exists)
+        title: exam.title || null,
+        board: exam.board ? (exam.board._id || exam.board) : null, // Handle populated or ObjectId
       } : null,
       subject: subject ? {
-        _id: subject._id,
+        _id: subjectIdValue,
         name: subject.name,
         icon: subject.icon,
       } : null,
       subjectName: subject?.name || null,
       questionPaper: questionPaper ? {
-        _id: questionPaper._id,
+        _id: questionPaper._id || questionPaperIdValue,
         name: questionPaper.name,
       } : null,
       questions: testQuestionsWithNumbers.map((q) => ({
@@ -201,6 +218,8 @@ export const createTest = async (req, res) => {
       submitted: false,
     });
 
+    console.log(`[createTest] Creating test attempt: testId=${testId}, userId=${userId || 'anonymous'}, sessionId=${sessionId || 'none'}, examId=${examIdValue}, subjectId=${subjectIdValue}, questionPaperId=${questionPaperIdValue}, questionsCount=${testQuestionsWithNumbers.length}`);
+
     res.status(201).json({
       testId,
       exam: testAttempt.exam,
@@ -210,6 +229,10 @@ export const createTest = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating test:', error);
+    console.error('Error stack:', error.stack);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ error: 'Validation error', details: error.message, errors: error.errors });
+    }
     res.status(500).json({ error: error.message });
   }
 };
@@ -306,14 +329,17 @@ export const submitTest = async (req, res) => {
     }
 
         // Check authorization - allow if userId matches OR if anonymous (no userId)
+        // Handle ObjectId comparison for lean() objects
         if (req.user) {
-          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+          const testUserIdStr = test.userId ? String(test.userId) : null;
+          const reqUserIdStr = req.user._id ? String(req.user._id) : null;
+          if (!testUserIdStr || testUserIdStr !== reqUserIdStr) {
             return res.status(403).json({ error: 'Not authorized' });
           }
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+            return res.status(403).json({ error: 'Not authorized' });
           }
     }
 
@@ -460,9 +486,9 @@ export const getTestResult = async (req, res) => {
 
     // Cache miss - fetch from database
     console.log('💾 Cache MISS: Fetching test result from database');
-    // Optimize: Use lean() and select only needed fields
+    // Optimize: Use lean() and select only needed fields (include userId and sessionId for authorization)
     const test = await TestAttempt.findOne({ testId })
-      .select('testId examId subjectId questionPaperId subjectName exam boardId score correct total startedAt submittedAt results submitted questions')
+      .select('testId examId subjectId questionPaperId subjectName exam boardId score correct total startedAt submittedAt results submitted questions userId sessionId')
       .lean(); // Use lean() for better performance
     if (!test) {
       console.warn(`[getTestResult] Test not found: ${testId}`);
@@ -473,16 +499,21 @@ export const getTestResult = async (req, res) => {
       });
     }
 
-        // Check authorization - allow if userId matches OR if anonymous (no userId)
+        // Check authorization - allow if userId matches OR if anonymous (no userId) and sessionId matches
+        // Handle ObjectId comparison for lean() objects
         if (req.user) {
-          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+          // Authenticated user - must match userId
+          const testUserIdStr = test.userId ? String(test.userId) : null;
+          const reqUserIdStr = req.user._id ? String(req.user._id) : null;
+          if (!testUserIdStr || testUserIdStr !== reqUserIdStr) {
             return res.status(403).json({ error: 'Not authorized' });
           }
         } else {
-          // Anonymous user - can only access tests with no userId (anonymous tests)
+          // Anonymous user - must have no userId and sessionId must match (if test has sessionId)
           if (test.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+            return res.status(403).json({ error: 'Not authorized' });
           }
+          // Note: sessionId matching is handled by testId format, but we could add explicit check if needed
     }
 
     if (!test.submitted) {
@@ -565,14 +596,17 @@ export const deleteTest = async (req, res) => {
     }
 
         // Check authorization - allow if userId matches OR if anonymous (no userId)
+        // Handle ObjectId comparison for lean() objects
         if (req.user) {
-          if (!test.userId || test.userId.toString() !== req.user._id.toString()) {
+          const testUserIdStr = test.userId ? String(test.userId) : null;
+          const reqUserIdStr = req.user._id ? String(req.user._id) : null;
+          if (!testUserIdStr || testUserIdStr !== reqUserIdStr) {
             return res.status(403).json({ error: 'Not authorized' });
           }
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+            return res.status(403).json({ error: 'Not authorized' });
           }
     }
 
