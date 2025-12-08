@@ -3,28 +3,12 @@ import Question from '../models/Question.js';
 import Subject from '../models/Subject.js';
 import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
-// Use Redis cache if available, fallback to in-memory cache
-import cacheService from '../services/redisCacheService.js';
 
 // Get all question papers
 export const getQuestionPapers = async (req, res) => {
   try {
     const { subjectId, examId, boardId } = req.query;
     
-    // Create cache key based on query parameters
-    const cacheKey = `questionPapers:${subjectId || 'all'}:${examId || 'all'}:${boardId || 'all'}`;
-    
-    // Check cache first (Redis or in-memory fallback)
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT: Returning question papers from cache');
-      res.set('Cache-Control', 'public, max-age=300');
-      res.set('X-Cache-Status', 'HIT');
-      return res.json(cached);
-    }
-    
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching question papers from database');
     const query = {};
     if (subjectId) query.subject = subjectId;
     if (examId) query.exam = examId;
@@ -42,11 +26,6 @@ export const getQuestionPapers = async (req, res) => {
       if (paper.exam) paper.exam.name = paper.exam.title;
     });
 
-    // Store in cache for 5 minutes (Redis or in-memory fallback)
-    await cacheService.set(cacheKey, questionPapers, 5 * 60 * 1000);
-
-    res.set('Cache-Control', 'public, max-age=300');
-    res.set('X-Cache-Status', 'MISS');
     res.json(questionPapers);
   } catch (error) {
     console.error('Error fetching question papers:', error);
@@ -59,20 +38,6 @@ export const getQuestionPaper = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Create cache key for single question paper
-    const cacheKey = `questionPaper:${id}`;
-    
-    // Check cache first (Redis or in-memory fallback)
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT: Returning question paper from cache');
-      res.set('Cache-Control', 'public, max-age=300');
-      res.set('X-Cache-Status', 'HIT');
-      return res.json(cached);
-    }
-    
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching question paper from database');
     const questionPaper = await QuestionPaper.findById(id)
       .populate('subject', 'name slug icon')
       .populate('exam', 'title slug')
@@ -85,11 +50,6 @@ export const getQuestionPaper = async (req, res) => {
     
     if (questionPaper?.exam) questionPaper.exam.name = questionPaper.exam.title;
 
-    // Store in cache for 5 minutes (Redis or in-memory fallback)
-    await cacheService.set(cacheKey, questionPaper, 5 * 60 * 1000);
-
-    res.set('Cache-Control', 'public, max-age=300');
-    res.set('X-Cache-Status', 'MISS');
     res.json(questionPaper);
   } catch (error) {
     console.error('Error fetching question paper:', error);

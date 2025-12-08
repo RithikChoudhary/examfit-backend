@@ -4,8 +4,6 @@ import Exam from '../models/Exam.js';
 import Subject from '../models/Subject.js';
 import Question from '../models/Question.js';
 import { getPaginationParams, getPaginationResponse } from '../utils/pagination.js';
-// Use Redis cache if available, fallback to in-memory cache
-import cacheService from '../services/redisCacheService.js';
 
 export const createBoard = async (req, res) => {
   try {
@@ -39,22 +37,6 @@ export const getBoards = async (req, res) => {
   try {
     const { page, limit, skip } = getPaginationParams(req);
     
-    // Create cache key based on pagination (only cache first page)
-    const cacheKey = `boards:admin:${page || 1}:${limit || 10}`;
-    
-    // Check cache first (only for first page to keep cache simple)
-    if ((!page || page === 1) && (!limit || limit <= 20)) {
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        console.log('⚡ Cache HIT: Returning boards from cache');
-        res.set('Cache-Control', 'public, max-age=86400'); // 1 day
-        res.set('X-Cache-Status', 'HIT');
-        return res.json(cached);
-      }
-    }
-
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching boards from database');
     const boards = await Board.find()
       .populate('exams', 'title slug')
       .skip(skip)
@@ -68,13 +50,6 @@ export const getBoards = async (req, res) => {
       pagination: getPaginationResponse(page, limit, total),
     };
 
-    // Cache only first page results for 1 day (boards rarely change)
-    if ((!page || page === 1) && (!limit || limit <= 20)) {
-      await cacheService.set(cacheKey, response, 24 * 60 * 60 * 1000); // 1 day
-    }
-
-    res.set('Cache-Control', 'public, max-age=86400'); // 1 day in seconds
-    res.set('X-Cache-Status', (!page || page === 1) && (!limit || limit <= 20) ? 'MISS' : 'SKIP');
     res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -85,20 +60,6 @@ export const getBoard = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Create cache key for single board
-    const cacheKey = `board:${id}`;
-    
-    // Check cache first
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT: Returning board from cache');
-      res.set('Cache-Control', 'public, max-age=300');
-      res.set('X-Cache-Status', 'HIT');
-      return res.json(cached);
-    }
-
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching board from database');
     const board = await Board.findById(id)
       .populate('exams', 'title slug parentExam duration totalQuestions');
 
@@ -106,14 +67,7 @@ export const getBoard = async (req, res) => {
       return res.status(404).json({ error: 'Board not found' });
     }
 
-    const response = { board };
-
-    // Store in cache for 1 day (boards rarely change)
-    await cacheService.set(cacheKey, response, 24 * 60 * 60 * 1000); // 1 day
-
-    res.set('Cache-Control', 'public, max-age=86400'); // 1 day in seconds
-    res.set('X-Cache-Status', 'MISS');
-    res.json(response);
+    res.json({ board });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

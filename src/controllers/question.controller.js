@@ -4,8 +4,6 @@ import Exam from '../models/Exam.js';
 import Subject from '../models/Subject.js';
 import QuestionPaper from '../models/QuestionPaper.js';
 import { getPaginationParams, getPaginationResponse } from '../utils/pagination.js';
-// Use Redis cache if available, fallback to in-memory cache
-import cacheService from '../services/redisCacheService.js';
 
 // Helper function to update exam and parent exam question counts
 const updateExamQuestionCounts = async (examId) => {
@@ -161,28 +159,7 @@ export const getQuestions = async (req, res) => {
     const { page, limit, skip } = getPaginationParams(req);
     const { exam, subject, questionPaper, q, status, all } = req.query;
 
-    // Create cache key based on query parameters (only cache for non-admin and first page)
     const isAdmin = req.user?.role === 'admin';
-    const cacheKey = `questions:${exam || 'all'}:${subject || 'all'}:${questionPaper || 'all'}:${q || 'none'}:${status || 'published'}:${page || 1}:${limit || 10}`;
-    
-    // Only cache if not admin and first page (to keep cache manageable)
-    const shouldCache = !isAdmin && (!page || page === 1) && (!limit || limit <= 20) && !q;
-    
-    // Check cache first
-    if (shouldCache) {
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        console.log('⚡ Cache HIT: Returning questions from cache');
-        res.set('Cache-Control', 'public, max-age=300');
-        res.set('X-Cache-Status', 'HIT');
-        return res.json(cached);
-      }
-    }
-
-    // Cache miss - fetch from database
-    if (shouldCache) {
-      console.log('💾 Cache MISS: Fetching questions from database');
-    }
     
     const query = {};
     if (exam) query.exam = exam;
@@ -236,13 +213,6 @@ export const getQuestions = async (req, res) => {
       pagination: getPaginationResponse(page, limit, total),
     };
 
-    // Store in cache for 5 minutes (only for non-admin, first page, no search)
-    if (shouldCache) {
-      await cacheService.set(cacheKey, response, 5 * 60 * 1000);
-    }
-
-    res.set('Cache-Control', 'public, max-age=300');
-    res.set('X-Cache-Status', shouldCache ? 'MISS' : 'SKIP');
     res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -253,25 +223,6 @@ export const getQuestion = async (req, res) => {
   try {
     const { id } = req.params;
     const isAdmin = req.user?.role === 'admin';
-    
-    // Create cache key for single question (different for admin vs student)
-    const cacheKey = `question:${id}:${isAdmin ? 'admin' : 'student'}`;
-    
-    // Check cache first (only for non-admin to avoid caching correct answers)
-    if (!isAdmin) {
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        console.log('⚡ Cache HIT: Returning question from cache');
-        res.set('Cache-Control', 'public, max-age=300');
-        res.set('X-Cache-Status', 'HIT');
-        return res.json(cached);
-      }
-    }
-
-    // Cache miss - fetch from database
-    if (!isAdmin) {
-      console.log('💾 Cache MISS: Fetching question from database');
-    }
     
     const selectFields = isAdmin
       ? ''
@@ -286,16 +237,7 @@ export const getQuestion = async (req, res) => {
       return res.status(404).json({ error: 'Question not found' });
     }
 
-    const response = { question };
-
-    // Store in cache for 5 minutes (only for non-admin)
-    if (!isAdmin) {
-      await cacheService.set(cacheKey, response, 5 * 60 * 1000);
-    }
-
-    res.set('Cache-Control', 'public, max-age=300');
-    res.set('X-Cache-Status', isAdmin ? 'SKIP' : 'MISS');
-    res.json(response);
+    res.json({ question });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -472,20 +472,7 @@ export const getTestResult = async (req, res) => {
   try {
     const { testId } = req.params;
 
-    // Create cache key for test result (only cache submitted tests)
-    const cacheKey = `testResult:${testId}`;
-    
-    // Check cache first (only for submitted tests)
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT: Returning test result from cache');
-      res.set('Cache-Control', 'public, max-age=60'); // Shorter TTL for test results
-      res.set('X-Cache-Status', 'HIT');
-      return res.json(cached);
-    }
-
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching test result from database');
+    // Fetch from database
     // Optimize: Use lean() and select only needed fields (include userId and sessionId for authorization)
     const test = await TestAttempt.findOne({ testId })
       .select('testId examId subjectId questionPaperId subjectName exam boardId score correct total startedAt submittedAt results submitted questions userId sessionId')
@@ -548,8 +535,6 @@ export const getTestResult = async (req, res) => {
         submitted: false,
         questions: test.questions.map(q => q.question),
       };
-      res.set('Cache-Control', 'no-cache'); // Don't cache in-progress tests
-      res.set('X-Cache-Status', 'SKIP');
       return res.json(response);
     }
 
@@ -571,11 +556,6 @@ export const getTestResult = async (req, res) => {
       submitted: true,
     };
 
-    // Store submitted test results in cache for 1 hour (they don't change)
-    await cacheService.set(cacheKey, response, 60 * 60 * 1000);
-
-    res.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-    res.set('X-Cache-Status', 'MISS');
     res.json(response);
   } catch (error) {
     console.error('Error getting test result:', error);

@@ -5,27 +5,11 @@ import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
 
 // Get all subjects
-// Use Redis cache if available, fallback to in-memory cache
-import cacheService from '../services/redisCacheService.js';
 
 export const getSubjects = async (req, res) => {
   try {
     const { examId, boardId } = req.query;
     
-    // Create cache key based on query parameters
-    const cacheKey = `subjects:${examId || 'all'}:${boardId || 'all'}`;
-    
-    // Check cache first (Redis or in-memory fallback)
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT: Returning subjects from cache');
-      res.set('Cache-Control', 'public, max-age=300');
-      res.set('X-Cache-Status', 'HIT');
-      return res.json(cached);
-    }
-    
-    // Cache miss - fetch from database
-    console.log('💾 Cache MISS: Fetching subjects from database');
     const query = {};
     if (examId) query.exam = examId;
     if (boardId) query.board = boardId;
@@ -46,11 +30,6 @@ export const getSubjects = async (req, res) => {
       }
     });
 
-    // Store in cache for 5 minutes (Redis or in-memory fallback)
-    await cacheService.set(cacheKey, subjects, 5 * 60 * 1000);
-
-    res.set('Cache-Control', 'public, max-age=300');
-    res.set('X-Cache-Status', 'MISS');
     res.json(subjects);
   } catch (error) {
     console.error('Error fetching subjects:', error);
