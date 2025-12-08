@@ -64,10 +64,12 @@ export const createTest = async (req, res) => {
     let subject = null;
     let exam = null;
 
+    // Optimize: Use lean() and select only needed fields
     if (questionPaperId) {
       questionPaper = await QuestionPaper.findById(questionPaperId)
-        .populate('subject')
-        .populate('exam');
+        .populate('subject', 'name icon') // Only select needed fields
+        .populate('exam', 'title name board') // Only select needed fields
+        .lean(); // Use lean() for better performance
       
       if (!questionPaper) {
         return res.status(404).json({ error: 'Question paper not found' });
@@ -76,13 +78,17 @@ export const createTest = async (req, res) => {
       subject = questionPaper.subject;
       exam = questionPaper.exam;
     } else if (examId) {
-      exam = await Exam.findById(examId).populate('board', 'name');
+      exam = await Exam.findById(examId)
+        .populate('board', 'name')
+        .lean(); // Use lean() for better performance
       if (!exam) {
         return res.status(404).json({ error: 'Exam not found' });
       }
 
       if (subjectId) {
-        subject = await Subject.findById(subjectId);
+        subject = await Subject.findById(subjectId)
+          .select('name icon')
+          .lean(); // Use lean() for better performance
       }
     } else {
       return res.status(400).json({ error: 'Either questionPaperId or examId must be provided' });
@@ -114,29 +120,34 @@ export const createTest = async (req, res) => {
       });
     }
 
+    // Optimize: Use lean() and select only needed fields in populate
     const testQuestions = await Question.find({
       _id: { $in: questionIds },
       status: 'published',
     })
     .select('-createdBy')
-    .populate('subject')
-    .populate('questionPaper')
-    .sort({ createdAt: 1 }); // Sort by creation date ascending for consistent numbering
+    .populate('subject', 'name icon') // Only select needed fields
+    .populate('questionPaper', 'name section') // Only select needed fields
+    .sort({ createdAt: 1 })
+    .lean(); // Use lean() for better performance - returns plain JS objects
 
     if (testQuestions.length === 0) {
       return res.status(400).json({ error: 'No questions available for this test' });
     }
 
     // Calculate question numbers based on position in question paper (if available)
+    // Optimize: Only fetch question IDs if we have questionPaperId
     let questionNumberMap = new Map();
     if (questionPaperId) {
       // Get all questions for this question paper, sorted the same way
+      // Use lean() and only select _id for faster query
       const allPaperQuestions = await Question.find({
         questionPaper: questionPaperId,
         status: 'published',
       })
       .select('_id')
-      .sort({ createdAt: 1 }); // Same sort order as admin dashboard
+      .sort({ createdAt: 1 })
+      .lean(); // Use lean() for better performance
       
       // Create a map of question ID to question number
       allPaperQuestions.forEach((q, index) => {
@@ -144,12 +155,11 @@ export const createTest = async (req, res) => {
       });
     }
 
-    // Add question numbers to test questions
+    // Add question numbers to test questions (already lean objects, no need for toObject())
     const testQuestionsWithNumbers = testQuestions.map((q, idx) => {
-      const qObj = q.toObject();
       // Use the question number from the paper, or fall back to array index + 1
-      qObj.questionNumber = questionNumberMap.get(q._id.toString()) || (idx + 1);
-      return qObj;
+      q.questionNumber = questionNumberMap.get(q._id.toString()) || (idx + 1);
+      return q;
     });
 
     // Generate test ID - use userId if logged in, otherwise use session ID
@@ -238,7 +248,10 @@ export const saveAnswer = async (req, res) => {
 
     if (!result) {
       // Check if test exists but is submitted or belongs to different user
-      const test = await TestAttempt.findOne({ testId });
+      // Optimize: Use lean() and select only needed fields
+      const test = await TestAttempt.findOne({ testId })
+        .select('testId userId sessionId submitted')
+        .lean();
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
@@ -284,7 +297,10 @@ export const submitTest = async (req, res) => {
     
     while (retries > 0) {
       try {
-        test = await TestAttempt.findOne({ testId });
+        // Optimize: Use lean() and select only needed fields
+        test = await TestAttempt.findOne({ testId })
+          .select('_id testId userId sessionId submitted questions score correct total results examId subjectId questionPaperId __v')
+          .lean(); // Use lean() for better performance
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
@@ -313,10 +329,13 @@ export const submitTest = async (req, res) => {
           });
     }
 
+    // Optimize: Only fetch correctIndex and explanation - we already have question data in test
     const questionIds = test.questions.map(q => q.questionId);
     const questions = await Question.find({
       _id: { $in: questionIds },
-    });
+    })
+    .select('_id correctIndex explanation') // Only select needed fields
+    .lean(); // Use lean() for better performance
 
     const questionMap = new Map();
     questions.forEach(q => {
@@ -347,6 +366,7 @@ export const submitTest = async (req, res) => {
     const score = (correct / test.questions.length) * 100;
         
         // Use atomic update to avoid version conflicts
+        // Optimize: Use lean() in response and select only needed fields
         const updateResult = await TestAttempt.findOneAndUpdate(
           { 
             _id: test._id, 
@@ -365,7 +385,9 @@ export const submitTest = async (req, res) => {
           },
           { 
             new: true, 
-            runValidators: true 
+            runValidators: true,
+            lean: true, // Use lean() for faster response
+            select: 'testId score correct total results submitted submittedAt' // Only return needed fields
           }
         );
 
@@ -377,7 +399,10 @@ export const submitTest = async (req, res) => {
             continue;
           } else {
             // Check if it was submitted by another request
-            const updatedTest = await TestAttempt.findOne({ testId });
+            // Optimize: Use lean() and select only needed fields
+            const updatedTest = await TestAttempt.findOne({ testId })
+              .select('submitted score correct total results')
+              .lean();
             if (updatedTest && updatedTest.submitted) {
               return res.json({
                 testId,
@@ -435,7 +460,10 @@ export const getTestResult = async (req, res) => {
 
     // Cache miss - fetch from database
     console.log('💾 Cache MISS: Fetching test result from database');
-    const test = await TestAttempt.findOne({ testId });
+    // Optimize: Use lean() and select only needed fields
+    const test = await TestAttempt.findOne({ testId })
+      .select('testId examId subjectId questionPaperId subjectName exam boardId score correct total startedAt submittedAt results submitted questions')
+      .lean(); // Use lean() for better performance
     if (!test) {
       console.warn(`[getTestResult] Test not found: ${testId}`);
       return res.status(404).json({ 
@@ -459,10 +487,19 @@ export const getTestResult = async (req, res) => {
 
     if (!test.submitted) {
       // Return test data for in-progress tests (don't cache in-progress tests)
-      const exam = await Exam.findById(test.examId);
-      let subject = null;
-      if (test.subjectId) {
-        subject = await Subject.findById(test.subjectId);
+      // Optimize: Only fetch if not already in test document, use lean() and select minimal fields
+      let exam = test.exam;
+      let subject = test.subject;
+      
+      if (!exam && test.examId) {
+        exam = await Exam.findById(test.examId)
+          .select('_id title')
+          .lean();
+      }
+      if (!subject && test.subjectId) {
+        subject = await Subject.findById(test.subjectId)
+          .select('_id name')
+          .lean();
       }
       const response = {
         testId,
@@ -519,7 +556,10 @@ export const deleteTest = async (req, res) => {
   try {
     const { testId } = req.params;
 
-    const test = await TestAttempt.findOne({ testId });
+    // Optimize: Use lean() and select only needed fields
+    const test = await TestAttempt.findOne({ testId })
+      .select('testId userId sessionId')
+      .lean();
     if (!test) {
       return res.status(404).json({ error: 'Test not found' });
     }
