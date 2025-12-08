@@ -7,31 +7,19 @@ import TestAttempt from '../models/TestAttempt.js';
 
 export const getBoards = async (req, res) => {
   try {
-    // Optimize: Use lean() for faster queries and select only needed fields
+    // Optimize: Only fetch minimal data needed for home page
+    // Remove nested populates - not needed on home page
     const boards = await Board.find()
-      .select('_id name slug description exams')
-      .populate({
-        path: 'exams',
-        select: '_id title slug parentExam',
-        match: { parentExam: null }, // Only get root exams (no parent)
-        populate: {
-          path: 'subjects',
-          model: 'Subject',
-          select: '_id name icon exam', // Only select needed fields
-        },
-      })
-      .sort({ name: 1 })
+      .select('_id name slug description')
+      .sort({ priority: 1, name: 1 })
       .lean(); // Use lean() for better performance
 
-    // Filter out boards with no exams after populate
-    const organizedBoards = boards
-      .filter(board => board.exams && board.exams.length > 0)
-      .map(board => ({
+    // Return minimal data
+    const organizedBoards = boards.map(board => ({
       _id: board._id,
       name: board.name,
       slug: board.slug,
-      description: board.description,
-      exams: organizeExams(board.exams),
+      description: board.description || '',
     }));
 
     res.json({ boards: organizedBoards });
