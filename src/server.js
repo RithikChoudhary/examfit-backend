@@ -14,8 +14,23 @@ import questionsRoutes from './routes/questions.routes.js';
 import studentsRoutes from './routes/students.routes.js';
 import currentAffairsRoutes from './routes/currentAffairs.routes.js';
 import errorsRoutes from './routes/errors.routes.js';
+import cacheRoutes from './routes/cache.routes.js';
+// Use Redis cache if available, fallback to in-memory cache
+import cacheService from './services/redisCacheService.js';
 
 const app = express();
+
+// Cleanup cache on process exit
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, cleaning up cache...');
+  await cacheService.disconnect();
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, cleaning up cache...');
+  await cacheService.disconnect();
+  process.exit(0);
+});
 
 // Trust proxy - required when behind a reverse proxy (Render, etc.)
 app.set('trust proxy', true);
@@ -111,6 +126,7 @@ app.use('/api/questions', questionsRoutes);
 app.use('/api/student', studentsRoutes);
 app.use('/api/current-affairs', currentAffairsRoutes);
 app.use('/api/errors', errorsRoutes); // Frontend error logging
+app.use('/api/cache', cacheRoutes); // Cache management and stats
 
 // Error handling middleware
 app.use((err, req, res, next) => {

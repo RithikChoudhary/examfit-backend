@@ -23,3 +23,7 @@ services:
       # JWT Secret - Add in Render dashboard for security
       # - key: JWT_SECRET
       #   sync: false
+      # Redis URL - Add in Render dashboard for security
+      # - key: REDIS_URL
+      #   value: redis://default:FaeNDtkwl74GyCJ12H6yIo4D2HAw5nBq@redis-14966.c301.ap-south-1-1.ec2.cloud.redislabs.com:14966
+      #   sync: false

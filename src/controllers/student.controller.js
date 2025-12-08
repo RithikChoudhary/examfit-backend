@@ -4,12 +4,24 @@ import Subject from '../models/Subject.js';
 import QuestionPaper from '../models/QuestionPaper.js';
 import Question from '../models/Question.js';
 import TestAttempt from '../models/TestAttempt.js';
+// Use Redis cache if available, fallback to in-memory cache
+import cacheService from '../services/redisCacheService.js';
 
 export const getBoards = async (req, res) => {
   try {
-    // Optimize: Only fetch minimal data needed for home page
-    // Remove nested populates - not needed on home page
-    // Use indexes for faster sorting
+    const cacheKey = 'boards:all';
+    
+    // Check cache first (Redis or in-memory fallback)
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      console.log('⚡ Cache HIT: Returning boards from cache');
+      res.set('Cache-Control', 'public, max-age=300');
+      res.set('X-Cache-Status', 'HIT');
+      return res.json({ boards: cached });
+    }
+
+    // Cache miss - fetch from database
+    console.log('💾 Cache MISS: Fetching boards from database');
     const boards = await Board.find()
       .select('_id name slug description priority')
       .sort({ priority: 1, name: 1 })
@@ -24,8 +36,12 @@ export const getBoards = async (req, res) => {
       description: board.description || '',
     }));
 
+    // Store in cache for 5 minutes (Redis or in-memory fallback)
+    await cacheService.set(cacheKey, organizedBoards, 5 * 60 * 1000);
+
     // Set cache headers for better performance
     res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+    res.set('X-Cache-Status', 'MISS');
     res.json({ boards: organizedBoards });
   } catch (error) {
     console.error('Error fetching boards:', error);
@@ -234,8 +250,8 @@ export const saveAnswer = async (req, res) => {
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-            return res.status(403).json({ error: 'Not authorized' });
-          }
+      return res.status(403).json({ error: 'Not authorized' });
+    }
         }
     if (test.submitted) {
       return res.status(400).json({ error: 'Test already submitted' });
@@ -281,9 +297,9 @@ export const submitTest = async (req, res) => {
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-            return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized' });
           }
-        }
+    }
 
     if (test.submitted) {
           // Test already submitted, return existing results
@@ -423,9 +439,9 @@ export const getTestResult = async (req, res) => {
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-            return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized' });
           }
-        }
+    }
 
     if (!test.submitted) {
       // Return test data for in-progress tests
@@ -491,9 +507,9 @@ export const deleteTest = async (req, res) => {
         } else {
           // Anonymous user - can only access tests with no userId (anonymous tests)
           if (test.userId) {
-            return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized' });
           }
-        }
+    }
 
     await TestAttempt.deleteOne({ testId });
     console.log(`Test ${testId} deleted from database`);
