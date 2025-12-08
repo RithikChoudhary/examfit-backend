@@ -132,12 +132,12 @@ export const createTest = async (req, res) => {
       });
     }
 
-    // Optimize: Use lean() and select only needed fields in populate
+    // Optimize: Use lean(), limit fields, avoid unnecessary populates
     const testQuestions = await Question.find({
       _id: { $in: questionIds },
       status: 'published',
     })
-    .select('-createdBy')
+    .select('_id text options correctIndex explanation difficulty tags media questionPaper subject exam questionNumber')
     .populate('subject', 'name icon') // Only select needed fields
     .populate('questionPaper', 'name section') // Only select needed fields
     .sort({ createdAt: 1 })

@@ -14,11 +14,13 @@ export const getSubjects = async (req, res) => {
     if (examId) query.exam = examId;
     if (boardId) query.board = boardId;
 
+    // Optimize: Limit results, select only needed fields, optimize populates
     const subjects = await Subject.find(query)
       .select('_id name slug description icon exam board priority sectionPriorities')
       .populate('exam', 'title slug')
       .populate('board', 'name slug')
       .sort({ priority: -1, name: 1 })
+      .limit(100) // Limit to 100 subjects to avoid huge responses
       .lean();
     
     // Add name field from title for compatibility and convert Maps
@@ -40,7 +42,9 @@ export const getSubjects = async (req, res) => {
 // Get single subject
 export const getSubject = async (req, res) => {
   try {
+    // Optimize: Select only needed fields
     const subject = await Subject.findById(req.params.id)
+      .select('_id name slug description icon exam board priority sectionPriorities createdAt')
       .populate('exam', 'title slug')
       .populate('board', 'name slug')
       .lean();
