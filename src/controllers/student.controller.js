@@ -15,7 +15,7 @@ export const getBoards = async (req, res) => {
     const cached = await cacheService.get(cacheKey);
     if (cached) {
       console.log('⚡ Cache HIT: Returning boards from cache');
-      res.set('Cache-Control', 'public, max-age=300');
+      res.set('Cache-Control', 'public, max-age=86400'); // 1 day
       res.set('X-Cache-Status', 'HIT');
       return res.json({ boards: cached });
     }
@@ -36,11 +36,11 @@ export const getBoards = async (req, res) => {
       description: board.description || '',
     }));
 
-    // Store in cache for 5 minutes (Redis or in-memory fallback)
-    await cacheService.set(cacheKey, organizedBoards, 5 * 60 * 1000);
+    // Store in cache for 1 day (boards rarely change)
+    await cacheService.set(cacheKey, organizedBoards, 24 * 60 * 60 * 1000); // 1 day
 
     // Set cache headers for better performance
-    res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+    res.set('Cache-Control', 'public, max-age=86400'); // Cache for 1 day (86400 seconds)
     res.set('X-Cache-Status', 'MISS');
     res.json({ boards: organizedBoards });
   } catch (error) {

@@ -58,7 +58,9 @@ export const getExams = async (req, res) => {
       const cached = await cacheService.get(cacheKey);
       if (cached) {
         console.log('⚡ Cache HIT: Returning exams from cache');
-        res.set('Cache-Control', 'public, max-age=300');
+        // Set appropriate cache header based on whether board filter is used
+        const maxAge = board ? 86400 : 300; // 1 day for board-filtered, 5 min for others
+        res.set('Cache-Control', `public, max-age=${maxAge}`);
         res.set('X-Cache-Status', 'HIT');
         return res.json(cached);
       }
@@ -94,12 +96,15 @@ export const getExams = async (req, res) => {
       pagination: getPaginationResponse(page, limit, total),
     };
 
-    // Cache only first page results for 5 minutes (Redis or in-memory fallback)
+    // Cache only first page results for 1 day when board filter is used (exams rarely change per board)
+    const ttl = board ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000; // 1 day for board-filtered, 5 min for others
+    const maxAge = board ? 86400 : 300; // 1 day or 5 minutes in seconds
+    
     if ((!page || page === 1) && (!limit || limit <= 20)) {
-      await cacheService.set(cacheKey, response, 5 * 60 * 1000);
+      await cacheService.set(cacheKey, response, ttl);
     }
 
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', `public, max-age=${maxAge}`);
     res.set('X-Cache-Status', 'MISS');
     res.json(response);
   } catch (error) {

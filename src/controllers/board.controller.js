@@ -47,7 +47,7 @@ export const getBoards = async (req, res) => {
       const cached = await cacheService.get(cacheKey);
       if (cached) {
         console.log('⚡ Cache HIT: Returning boards from cache');
-        res.set('Cache-Control', 'public, max-age=300');
+        res.set('Cache-Control', 'public, max-age=86400'); // 1 day
         res.set('X-Cache-Status', 'HIT');
         return res.json(cached);
       }
@@ -68,12 +68,12 @@ export const getBoards = async (req, res) => {
       pagination: getPaginationResponse(page, limit, total),
     };
 
-    // Cache only first page results for 5 minutes
+    // Cache only first page results for 1 day (boards rarely change)
     if ((!page || page === 1) && (!limit || limit <= 20)) {
-      await cacheService.set(cacheKey, response, 5 * 60 * 1000);
+      await cacheService.set(cacheKey, response, 24 * 60 * 60 * 1000); // 1 day
     }
 
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', 'public, max-age=86400'); // 1 day in seconds
     res.set('X-Cache-Status', (!page || page === 1) && (!limit || limit <= 20) ? 'MISS' : 'SKIP');
     res.json(response);
   } catch (error) {
@@ -108,10 +108,10 @@ export const getBoard = async (req, res) => {
 
     const response = { board };
 
-    // Store in cache for 5 minutes
-    await cacheService.set(cacheKey, response, 5 * 60 * 1000);
+    // Store in cache for 1 day (boards rarely change)
+    await cacheService.set(cacheKey, response, 24 * 60 * 60 * 1000); // 1 day
 
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', 'public, max-age=86400'); // 1 day in seconds
     res.set('X-Cache-Status', 'MISS');
     res.json(response);
   } catch (error) {
