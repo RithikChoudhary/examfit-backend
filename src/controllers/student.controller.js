@@ -76,29 +76,23 @@ export const createTest = async (req, res) => {
     let subject = null;
     let exam = null;
 
-    // Optimize: Fetch metadata in parallel, use lean(), minimize populates
+    // Optimize: Fetch metadata efficiently, use lean(), minimize populates
     if (questionPaperId) {
-      // Fetch question paper and related data in parallel
-      const [paperResult, subjectResult, examResult] = await Promise.all([
-        QuestionPaper.findById(questionPaperId)
-          .select('_id name section subject exam')
-          .lean(),
-        Subject.findById(null).lean(), // Will be fetched separately
-        Exam.findById(null).lean(), // Will be fetched separately
-      ]);
+      // First fetch question paper to get subject and exam IDs
+      questionPaper = await QuestionPaper.findById(questionPaperId)
+        .select('_id name section subject exam')
+        .lean();
       
-      if (!paperResult) {
+      if (!questionPaper) {
         return res.status(404).json({ error: 'Question paper not found' });
       }
 
-      questionPaper = paperResult;
-      
-      // Fetch subject and exam in parallel
+      // Fetch subject and exam in parallel (faster than populates)
       const [fetchedSubject, fetchedExam] = await Promise.all([
-        Subject.findById(paperResult.subject)
+        Subject.findById(questionPaper.subject)
           .select('_id name icon')
           .lean(),
-        Exam.findById(paperResult.exam)
+        Exam.findById(questionPaper.exam)
           .select('_id title name board')
           .populate('board', 'name')
           .lean(),
