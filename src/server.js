@@ -15,6 +15,7 @@ import studentsRoutes from './routes/students.routes.js';
 import currentAffairsRoutes from './routes/currentAffairs.routes.js';
 import errorsRoutes from './routes/errors.routes.js';
 import cacheRoutes from './routes/cache.routes.js';
+import sitemapRoutes from './routes/sitemap.routes.js';
 // Use Redis cache if available, fallback to in-memory cache
 import cacheService from './services/redisCacheService.js';
 
@@ -128,6 +129,7 @@ app.use('/api/student', studentsRoutes);
 app.use('/api/current-affairs', currentAffairsRoutes);
 app.use('/api/errors', errorsRoutes); // Frontend error logging
 app.use('/api/cache', cacheRoutes); // Cache management and stats
+app.use('/', sitemapRoutes); // Sitemap at root level (/sitemap.xml)
 
 // Error handling middleware
 app.use((err, req, res, next) => {
