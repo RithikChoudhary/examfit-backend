@@ -58,6 +58,7 @@ const corsOptions = {
     });
     
     if (isAllowed) {
+      console.log(`CORS: Allowed origin: ${origin}`);
       callback(null, true);
     } else {
       // Log the rejected origin for debugging

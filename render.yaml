@@ -12,11 +12,11 @@ services:
       - key: PORT
         value: 4000
       - key: FRONTEND_URL
-        value: https://frontend.examfit.in
+        value: https://examfit.in
       - key: BACKEND_URL
         value: https://backend.examfit.in
       - key: CORS_ORIGINS
-        value: https://frontend.examfit.in,https://examfit.in
+        value: https://frontend.examfit.in,https://examfit.in,https://www.examfit.in
       # MongoDB URI - Add in Render dashboard for security
       # - key: MONGODB_URI
       #   sync: false
