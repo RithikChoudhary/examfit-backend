@@ -76,31 +76,49 @@ export const createTest = async (req, res) => {
     let subject = null;
     let exam = null;
 
-    // Optimize: Use lean() and select only needed fields
+    // Optimize: Fetch metadata in parallel, use lean(), minimize populates
     if (questionPaperId) {
-      questionPaper = await QuestionPaper.findById(questionPaperId)
-        .populate('subject', 'name icon') // Only select needed fields
-        .populate('exam', 'title name board') // Only select needed fields
-        .lean(); // Use lean() for better performance
+      // Fetch question paper and related data in parallel
+      const [paperResult, subjectResult, examResult] = await Promise.all([
+        QuestionPaper.findById(questionPaperId)
+          .select('_id name section subject exam')
+          .lean(),
+        Subject.findById(null).lean(), // Will be fetched separately
+        Exam.findById(null).lean(), // Will be fetched separately
+      ]);
       
-      if (!questionPaper) {
+      if (!paperResult) {
         return res.status(404).json({ error: 'Question paper not found' });
       }
 
-      subject = questionPaper.subject;
-      exam = questionPaper.exam;
+      questionPaper = paperResult;
+      
+      // Fetch subject and exam in parallel
+      const [fetchedSubject, fetchedExam] = await Promise.all([
+        Subject.findById(paperResult.subject)
+          .select('_id name icon')
+          .lean(),
+        Exam.findById(paperResult.exam)
+          .select('_id title name board')
+          .populate('board', 'name')
+          .lean(),
+      ]);
+      
+      subject = fetchedSubject;
+      exam = fetchedExam;
     } else if (examId) {
       exam = await Exam.findById(examId)
+        .select('_id title name board')
         .populate('board', 'name')
-        .lean(); // Use lean() for better performance
+        .lean();
       if (!exam) {
         return res.status(404).json({ error: 'Exam not found' });
       }
 
       if (subjectId) {
         subject = await Subject.findById(subjectId)
-          .select('name icon')
-          .lean(); // Use lean() for better performance
+          .select('_id name icon')
+          .lean();
       }
     } else {
       return res.status(400).json({ error: 'Either questionPaperId or examId must be provided' });
@@ -121,7 +139,10 @@ export const createTest = async (req, res) => {
 
     let questionIds = questions;
     if (!questionIds || questionIds.length === 0) {
-      const publishedQuestions = await Question.find(questionQuery).select('_id');
+      // Optimize: Use lean() and only select _id for faster query
+      const publishedQuestions = await Question.find(questionQuery)
+        .select('_id')
+        .lean();
       questionIds = publishedQuestions.map(q => q._id.toString());
     }
 
@@ -132,14 +153,12 @@ export const createTest = async (req, res) => {
       });
     }
 
-    // Optimize: Use lean(), limit fields, avoid unnecessary populates
+    // Optimize: Use lean(), limit fields, remove unnecessary populates (we already have subject/exam data)
     const testQuestions = await Question.find({
       _id: { $in: questionIds },
       status: 'published',
     })
-    .select('_id text options correctIndex explanation difficulty tags media questionPaper subject exam questionNumber')
-    .populate('subject', 'name icon') // Only select needed fields
-    .populate('questionPaper', 'name section') // Only select needed fields
+    .select('_id text options correctIndex explanation difficulty tags media')
     .sort({ createdAt: 1 })
     .lean(); // Use lean() for better performance - returns plain JS objects
 
@@ -147,30 +166,19 @@ export const createTest = async (req, res) => {
       return res.status(400).json({ error: 'No questions available for this test' });
     }
 
-    // Calculate question numbers based on position in question paper (if available)
-    // Optimize: Only fetch question IDs if we have questionPaperId
-    let questionNumberMap = new Map();
-    if (questionPaperId) {
-      // Get all questions for this question paper, sorted the same way
-      // Use lean() and only select _id for faster query
-      const allPaperQuestions = await Question.find({
-        questionPaper: questionPaperId,
-        status: 'published',
-      })
-      .select('_id')
-      .sort({ createdAt: 1 })
-      .lean(); // Use lean() for better performance
-      
-      // Create a map of question ID to question number
-      allPaperQuestions.forEach((q, index) => {
-        questionNumberMap.set(q._id.toString(), index + 1);
-      });
-    }
-
-    // Add question numbers to test questions (already lean objects, no need for toObject())
+    // Add question numbers and metadata (no need for separate query - use array index)
     const testQuestionsWithNumbers = testQuestions.map((q, idx) => {
-      // Use the question number from the paper, or fall back to array index + 1
-      q.questionNumber = questionNumberMap.get(q._id.toString()) || (idx + 1);
+      q.questionNumber = idx + 1;
+      // Add subject and exam data we already have
+      if (subject) {
+        q.subject = { _id: subject._id, name: subject.name, icon: subject.icon };
+      }
+      if (exam) {
+        q.exam = { _id: exam._id, title: exam.title || exam.name };
+      }
+      if (questionPaper) {
+        q.questionPaper = { _id: questionPaper._id, name: questionPaper.name, section: questionPaper.section };
+      }
       return q;
     });
 
