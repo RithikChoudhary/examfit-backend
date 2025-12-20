@@ -177,18 +177,24 @@ export const getQuestions = async (req, res) => {
     // If 'all' param is true, fetch all questions without pagination (for admin dashboard)
     const fetchAll = all === 'true';
     
-    // Build the query - for admin users, explicitly select all fields including correctIndex
+    // Debug: Log admin status
+    console.log('[getQuestions] Request info:', {
+      isAdmin,
+      userRole: req.user?.role,
+      userId: req.user?._id,
+      fetchAll,
+    });
+    
+    // Build the query - for admin users, don't exclude any fields
     // For non-admin, exclude correctIndex and createdBy
     let questionsQuery = Question.find(query);
     
-    // For admin users, explicitly list all fields to ensure correctIndex is included
-    // For non-admin, exclude correctIndex and createdBy
-    if (isAdmin) {
-      // Explicitly select all fields we need, including correctIndex
-      questionsQuery = questionsQuery.select('text options correctIndex explanation questionPaper subject exam difficulty tags media createdBy status createdAt');
-    } else {
+    // For non-admin users, exclude sensitive fields
+    // For admin, we don't call select() so all fields are included
+    if (!isAdmin) {
       questionsQuery = questionsQuery.select('-correctIndex -createdBy');
     }
+    // Note: For admin, no select() means ALL fields including correctIndex are returned
     
     questionsQuery = questionsQuery
       .populate('subject', 'name icon')
@@ -210,14 +216,16 @@ export const getQuestions = async (req, res) => {
     const questions = await questionsQuery;
 
     // Debug: Log first question to verify correctIndex is included for admin
-    if (isAdmin && questions.length > 0) {
+    if (questions.length > 0) {
       const firstQ = questions[0];
-      console.log('[getQuestions] Admin query - First question sample:', {
+      const questionObj = firstQ.toObject ? firstQ.toObject() : firstQ;
+      console.log('[getQuestions] First question sample:', {
+        isAdmin,
         _id: firstQ._id,
-        hasCorrectIndex: 'correctIndex' in firstQ,
-        correctIndex: firstQ.correctIndex,
-        correctIndexType: typeof firstQ.correctIndex,
-        allKeys: Object.keys(firstQ.toObject ? firstQ.toObject() : firstQ),
+        hasCorrectIndex: 'correctIndex' in questionObj,
+        correctIndex: questionObj.correctIndex,
+        correctIndexType: typeof questionObj.correctIndex,
+        allKeys: Object.keys(questionObj),
       });
     }
 
