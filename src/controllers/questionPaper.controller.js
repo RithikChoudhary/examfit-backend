@@ -14,9 +14,9 @@ export const getQuestionPapers = async (req, res) => {
     if (examId) query.exam = examId;
     if (boardId) query.board = boardId;
 
-    // Optimize: Select only needed fields, no populates (client already has subject/exam/board data)
+    // Select needed fields including subject/exam/board IDs for filtering
     const questionPapers = await QuestionPaper.find(query)
-      .select('_id name section year duration totalMarks priority createdAt')
+      .select('_id name section year duration totalMarks priority createdAt subject exam board')
       .sort({ section: 1, year: -1, priority: -1, name: 1 })
       .limit(200) // Limit to 200 question papers to avoid huge responses
       .lean();
