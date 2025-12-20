@@ -1,4 +1,8 @@
 import currentAffairsService from '../services/currentAffairsService.js';
+import cacheService from '../services/cacheService.js';
+
+// Cache TTL: 30 minutes for current affairs (data doesn't change frequently)
+const CACHE_TTL = 30 * 60 * 1000;
 
 export const getCurrentAffairs = async (req, res) => {
   try {
@@ -9,6 +13,16 @@ export const getCurrentAffairs = async (req, res) => {
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (date && !dateRegex.test(date)) {
       return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    
+    // Try cache first
+    const cacheKey = `current-affairs:${targetDate}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached && cached.affairs.length > 0) {
+      return res.json({
+        ...cached,
+        cached: true
+      });
     }
     
     let affairs = await currentAffairsService.getCurrentAffairsByDate(targetDate);
@@ -28,13 +42,20 @@ export const getCurrentAffairs = async (req, res) => {
       }
     }
     
-    res.json({
+    const response = {
       success: true,
       date: targetDate,
       count: affairs.length,
       affairs,
       autoFetched: affairs.length > 0 && autoFetch === 'true'
-    });
+    };
+    
+    // Cache only if we have data
+    if (affairs.length > 0) {
+      cacheService.set(cacheKey, response, CACHE_TTL);
+    }
+    
+    res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -42,12 +63,24 @@ export const getCurrentAffairs = async (req, res) => {
 
 export const getAvailableDates = async (req, res) => {
   try {
+    // Try cache first (shorter TTL for dates)
+    const cacheKey = 'current-affairs:dates';
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+    
     const dates = await currentAffairsService.getAvailableDates();
     
-    res.json({
+    const response = {
       success: true,
       dates
-    });
+    };
+    
+    // Cache for 10 minutes
+    cacheService.set(cacheKey, response, 10 * 60 * 1000);
+    
+    res.json(response);
   } catch (error) {
     console.error('Error getting available dates:', error);
     res.status(500).json({ error: error.message });

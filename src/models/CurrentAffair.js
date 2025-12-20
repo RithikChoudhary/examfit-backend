@@ -66,5 +66,12 @@ const currentAffairSchema = new mongoose.Schema({
 currentAffairSchema.index({ date: 1, order: 1 });
 currentAffairSchema.index({ date: -1 });
 
+// Unique compound index to prevent duplicate articles (same title on same date)
+// Using sparse: true to allow nulls
+currentAffairSchema.index(
+  { date: 1, title: 1 }, 
+  { unique: true, background: true }
+);
+
 export default mongoose.model('CurrentAffair', currentAffairSchema);
 

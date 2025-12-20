@@ -4,6 +4,10 @@ import Board from '../models/Board.js';
 import Subject from '../models/Subject.js';
 import Question from '../models/Question.js';
 import { getPaginationParams, getPaginationResponse } from '../utils/pagination.js';
+import cacheService from '../services/cacheService.js';
+
+// Cache TTL: 10 minutes for exams
+const CACHE_TTL = 10 * 60 * 1000;
 
 export const createExam = async (req, res) => {
   try {
@@ -48,6 +52,13 @@ export const getExams = async (req, res) => {
     const { page, limit, skip } = getPaginationParams(req);
     const { board, parent } = req.query;
 
+    // Try cache first
+    const cacheKey = `exams:list:${board || 'all'}:${parent || 'all'}:${page}:${limit}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+
     const query = {};
     if (board) query.board = board;
     if (parent !== undefined) {
@@ -75,6 +86,9 @@ export const getExams = async (req, res) => {
       exams,
       pagination: getPaginationResponse(page, limit, total),
     };
+
+    // Cache the response
+    cacheService.set(cacheKey, response, CACHE_TTL);
 
     res.json(response);
   } catch (error) {

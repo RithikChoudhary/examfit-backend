@@ -3,12 +3,23 @@ import Question from '../models/Question.js';
 import QuestionPaper from '../models/QuestionPaper.js';
 import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
+import cacheService from '../services/cacheService.js';
+
+// Cache TTL: 10 minutes for subjects
+const CACHE_TTL = 10 * 60 * 1000;
 
 // Get all subjects
 
 export const getSubjects = async (req, res) => {
   try {
     const { examId, boardId } = req.query;
+    
+    // Try cache first
+    const cacheKey = `subjects:list:${examId || 'all'}:${boardId || 'all'}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     
     const query = {};
     if (examId) query.exam = examId;
@@ -31,6 +42,9 @@ export const getSubjects = async (req, res) => {
         subject.sectionPriorities = Object.fromEntries(subject.sectionPriorities);
       }
     });
+
+    // Cache the response
+    cacheService.set(cacheKey, subjects, CACHE_TTL);
 
     res.json(subjects);
   } catch (error) {

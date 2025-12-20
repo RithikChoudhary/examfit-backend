@@ -3,11 +3,22 @@ import Question from '../models/Question.js';
 import Subject from '../models/Subject.js';
 import Exam from '../models/Exam.js';
 import Board from '../models/Board.js';
+import cacheService from '../services/cacheService.js';
+
+// Cache TTL: 10 minutes for question papers
+const CACHE_TTL = 10 * 60 * 1000;
 
 // Get all question papers
 export const getQuestionPapers = async (req, res) => {
   try {
     const { subjectId, examId, boardId } = req.query;
+    
+    // Try cache first
+    const cacheKey = `question-papers:list:${subjectId || 'all'}:${examId || 'all'}:${boardId || 'all'}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
     
     const query = {};
     if (subjectId) query.subject = subjectId;
@@ -20,6 +31,9 @@ export const getQuestionPapers = async (req, res) => {
       .sort({ section: 1, year: -1, priority: -1, name: 1 })
       .limit(200) // Limit to 200 question papers to avoid huge responses
       .lean();
+
+    // Cache the response
+    cacheService.set(cacheKey, questionPapers, CACHE_TTL);
 
     res.json(questionPapers);
   } catch (error) {

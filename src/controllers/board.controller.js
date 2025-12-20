@@ -4,6 +4,10 @@ import Exam from '../models/Exam.js';
 import Subject from '../models/Subject.js';
 import Question from '../models/Question.js';
 import { getPaginationParams, getPaginationResponse } from '../utils/pagination.js';
+import cacheService from '../services/cacheService.js';
+
+// Cache TTL: 10 minutes for boards (doesn't change often)
+const CACHE_TTL = 10 * 60 * 1000;
 
 export const createBoard = async (req, res) => {
   try {
@@ -37,6 +41,13 @@ export const getBoards = async (req, res) => {
   try {
     const { page, limit, skip } = getPaginationParams(req);
     
+    // Try cache first
+    const cacheKey = `boards:list:${page}:${limit}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+    
     // Optimize: Use lean() and select only needed fields, limit populate
     const boards = await Board.find()
       .select('_id name slug description priority exams createdAt')
@@ -56,6 +67,9 @@ export const getBoards = async (req, res) => {
       boards,
       pagination: getPaginationResponse(page, limit, total),
     };
+
+    // Cache the response
+    cacheService.set(cacheKey, response, CACHE_TTL);
 
     res.json(response);
   } catch (error) {
