@@ -174,15 +174,23 @@ export const getQuestions = async (req, res) => {
       query.status = 'published';
     }
 
-    const selectFields = isAdmin
-      ? ''
-      : '-correctIndex -createdBy';
-
     // If 'all' param is true, fetch all questions without pagination (for admin dashboard)
     const fetchAll = all === 'true';
     
-    let questionsQuery = Question.find(query)
-      .select(selectFields)
+    // Build the query - for admin users, explicitly select all fields including correctIndex
+    // For non-admin, exclude correctIndex and createdBy
+    let questionsQuery = Question.find(query);
+    
+    // For admin users, explicitly list all fields to ensure correctIndex is included
+    // For non-admin, exclude correctIndex and createdBy
+    if (isAdmin) {
+      // Explicitly select all fields we need, including correctIndex
+      questionsQuery = questionsQuery.select('text options correctIndex explanation questionPaper subject exam difficulty tags media createdBy status createdAt');
+    } else {
+      questionsQuery = questionsQuery.select('-correctIndex -createdBy');
+    }
+    
+    questionsQuery = questionsQuery
       .populate('subject', 'name icon')
       .populate('exam', 'title slug')
       .populate({
@@ -200,6 +208,18 @@ export const getQuestions = async (req, res) => {
     }
 
     const questions = await questionsQuery;
+
+    // Debug: Log first question to verify correctIndex is included for admin
+    if (isAdmin && questions.length > 0) {
+      const firstQ = questions[0];
+      console.log('[getQuestions] Admin query - First question sample:', {
+        _id: firstQ._id,
+        hasCorrectIndex: 'correctIndex' in firstQ,
+        correctIndex: firstQ.correctIndex,
+        correctIndexType: typeof firstQ.correctIndex,
+        allKeys: Object.keys(firstQ.toObject ? firstQ.toObject() : firstQ),
+      });
+    }
 
     // Add name field to exam for compatibility
     questions.forEach(q => {
@@ -224,12 +244,16 @@ export const getQuestion = async (req, res) => {
     const { id } = req.params;
     const isAdmin = req.user?.role === 'admin';
     
-    const selectFields = isAdmin
-      ? ''
-      : '-correctIndex -createdBy';
-
-    const question = await Question.findById(id)
-      .select(selectFields)
+    // Build the query - for admin users, include all fields (including correctIndex)
+    // For non-admin, exclude correctIndex and createdBy
+    let questionQuery = Question.findById(id);
+    
+    // Only exclude fields for non-admin users
+    if (!isAdmin) {
+      questionQuery = questionQuery.select('-correctIndex -createdBy');
+    }
+    
+    const question = await questionQuery
       .populate('subject', 'name')
       .populate('exam', 'title slug');
 
@@ -347,6 +371,12 @@ export const deleteQuestion = async (req, res) => {
 
 export const bulkUploadQuestions = async (req, res) => {
   try {
+    console.log('[bulkUploadQuestions] Request received:', {
+      questionsCount: req.body.questions?.length,
+      exam: req.body.exam,
+      subject: req.body.subject,
+      questionPaper: req.body.questionPaper,
+    });
     const { questions, exam, subject, questionPaper } = req.body;
 
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
@@ -388,6 +418,16 @@ export const bulkUploadQuestions = async (req, res) => {
       const q = questions[i];
       
       try {
+        // Debug first 3 questions
+        if (i < 3) {
+          console.log(`\n[Backend] Processing question ${i + 1}:`, {
+            text: q.text?.substring(0, 50),
+            optionsCount: q.options?.length,
+            receivedCorrectIndex: q.correctIndex,
+            options: q.options?.map(opt => ({ text: opt.text?.substring(0, 20) })),
+          });
+        }
+        
         // Validate question data
         if (!q.text || !q.text.trim()) {
           errors.push(`Question ${i + 1}: Question text is required`);
@@ -395,18 +435,34 @@ export const bulkUploadQuestions = async (req, res) => {
         }
 
         if (!q.options || !Array.isArray(q.options) || q.options.length < 2) {
-          errors.push(`Question ${i + 1}: At least 2 options are required`);
+          errors.push(`Question ${i + 1}: At least 2 options are required (got ${q.options?.length || 0})`);
           continue;
         }
 
-        const validOptions = q.options.filter(opt => opt.text && opt.text.trim());
+        const validOptions = q.options.filter(opt => opt && opt.text && opt.text.trim());
         if (validOptions.length < 2) {
-          errors.push(`Question ${i + 1}: At least 2 valid options are required`);
+          errors.push(`Question ${i + 1}: At least 2 valid options are required (got ${validOptions.length} valid out of ${q.options.length} total)`);
           continue;
         }
 
-        if (typeof q.correctIndex !== 'number' || q.correctIndex < 0 || q.correctIndex >= validOptions.length) {
-          errors.push(`Question ${i + 1}: Invalid correct answer index`);
+        // Ensure correctIndex is a valid number and within bounds
+        const correctIndex = typeof q.correctIndex === 'number' && !isNaN(q.correctIndex) 
+          ? Math.floor(q.correctIndex)  // Ensure it's an integer
+          : parseInt(q.correctIndex, 10);
+
+        // Debug after filtering
+        if (i < 3) {
+          console.log(`[Backend] Question ${i + 1} after filtering:`, {
+            validOptionsCount: validOptions.length,
+            receivedCorrectIndex: q.correctIndex,
+            processedCorrectIndex: correctIndex,
+            validRange: `0-${validOptions.length - 1}`,
+            isValid: correctIndex >= 0 && correctIndex < validOptions.length,
+          });
+        }
+
+        if (isNaN(correctIndex) || correctIndex < 0 || correctIndex >= validOptions.length) {
+          errors.push(`Question ${i + 1}: Invalid correct answer index (got ${q.correctIndex}, processed as ${correctIndex}, valid range: 0-${validOptions.length - 1})`);
           continue;
         }
 
@@ -421,7 +477,7 @@ export const bulkUploadQuestions = async (req, res) => {
             text: opt.text.trim(),
             media: opt.media || null
           })),
-          correctIndex: q.correctIndex,
+          correctIndex: correctIndex, // Use the validated and processed correctIndex
           explanation: (q.explanation || '').trim(),
           questionPaper: questionPaper,
           subject: subject,
@@ -432,6 +488,19 @@ export const bulkUploadQuestions = async (req, res) => {
         });
 
         const saved = await question.save();
+        
+        // Debug first 3 saved questions
+        if (i < 3) {
+          console.log(`[Backend] Question ${i + 1} saved:`, {
+            _id: saved._id,
+            correctIndex: saved.correctIndex,
+            correctIndexType: typeof saved.correctIndex,
+            correctOptionText: saved.options[saved.correctIndex]?.text?.substring(0, 30),
+            optionsCount: saved.options.length,
+            allOptions: saved.options.map((opt, idx) => `${idx}: "${opt.text?.substring(0, 20)}"`),
+          });
+        }
+        
         savedQuestions.push(saved);
       } catch (error) {
         errors.push(`Question ${i + 1}: ${error.message}`);
@@ -443,6 +512,12 @@ export const bulkUploadQuestions = async (req, res) => {
       await updateExamQuestionCounts(exam);
     }
 
+    console.log('[bulkUploadQuestions] Upload complete:', {
+      total: questions.length,
+      saved: savedQuestions.length,
+      errors: errors.length,
+    });
+    
     res.json({
       success: true,
       total: questions.length,
