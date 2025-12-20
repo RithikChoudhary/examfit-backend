@@ -3,6 +3,7 @@ import { body } from 'express-validator';
 import * as questionController from '../controllers/question.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { requireAdmin } from '../middlewares/role.middleware.js';
+import { optionalAuthenticate } from '../middlewares/optionalAuth.middleware.js';
 
 const router = express.Router();
 
@@ -49,8 +50,9 @@ const updateQuestionValidation = [
   body('status').optional().isIn(['draft', 'published']),
 ];
 
-router.get('/', questionController.getQuestions);
-router.get('/:id', questionController.getQuestion);
+// Use optionalAuthenticate to detect admin users (for including correctIndex)
+router.get('/', optionalAuthenticate, questionController.getQuestions);
+router.get('/:id', optionalAuthenticate, questionController.getQuestion);
 router.post('/bulk', authenticate, requireAdmin, questionController.bulkUploadQuestions);
 router.post('/', authenticate, questionValidation, questionController.createQuestion);
 router.patch('/:id', authenticate, updateQuestionValidation, questionController.updateQuestion);
